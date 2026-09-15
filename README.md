@@ -87,11 +87,16 @@ trace_exporter = { otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", p
 metrics_exporter = "none"
 ```
 
-Start Agent Telemetry before Codex:
+Start Agent Telemetry in one terminal:
 
 ```bash
 cargo run -- init
 cargo run -- serve
+```
+
+Then start Codex in another terminal:
+
+```bash
 codex
 ```
 
