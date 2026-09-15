@@ -1,4 +1,5 @@
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -18,15 +19,16 @@ impl CursorAgentAdapter {
         let is_decision = matches!(kind, AgentEventKind::Decision);
 
         let mut event = AgentEvent::new(self.name(), kind, hook_name.clone());
-        event.id = stable_hook_id(attributes, &hook_name);
+        event.id = stable_hook_id(payload);
         event.agent_version = string_attr(attributes, "cursor_version");
         event.session_id = string_attr(attributes, "conversation_id");
         event.turn_id = string_attr(attributes, "generation_id");
-        event.model = string_attr(attributes, "model_id").or_else(|| string_attr(attributes, "model"));
+        event.model =
+            string_attr(attributes, "model_id").or_else(|| string_attr(attributes, "model"));
         event.tool_name = string_attr(attributes, "tool_name")
             .or_else(|| string_attr(attributes, "subagent_type"));
-        event.duration_ms = number_attr(attributes, "duration")
-            .or_else(|| number_attr(attributes, "duration_ms"));
+        event.duration_ms =
+            number_attr(attributes, "duration").or_else(|| number_attr(attributes, "duration_ms"));
         event.status = status_for_hook(attributes, &hook_name);
 
         if is_decision {
@@ -73,6 +75,8 @@ impl SemanticAdapter for CursorAgentAdapter {
         event.timestamp = record.timestamp;
         event.agent_version = string_attr(&record.resource_attributes, "service.version");
         event.session_id = string_attr(&record.attributes, "cursor.conversation.id");
+        event.trace_id = record.trace_id.clone();
+        event.span_id = record.span_id.clone();
         event.model = string_attr(&record.attributes, "cursor.model.name");
         event.input_tokens = u64_attr(&record.attributes, "cursor.api.request.input_tokens");
         event.output_tokens = u64_attr(&record.attributes, "cursor.api.request.output_tokens");
@@ -111,7 +115,9 @@ fn kind_for_hook(name: &str) -> AgentEventKind {
 fn status_for_hook(attributes: &Map<String, Value>, hook_name: &str) -> Option<String> {
     match hook_name {
         "postToolUse" => Some("success".into()),
-        "postToolUseFailure" => string_attr(attributes, "failure_type").or_else(|| Some("error".into())),
+        "postToolUseFailure" => {
+            string_attr(attributes, "failure_type").or_else(|| Some("error".into()))
+        }
         "stop" => string_attr(attributes, "status"),
         "subagentStop" => string_attr(attributes, "status").or_else(|| Some("success".into())),
         _ => string_attr(attributes, "status"),
@@ -147,22 +153,17 @@ fn safe_hook_attributes(attributes: &Map<String, Value>) -> Map<String, Value> {
 
     SAFE_KEYS
         .iter()
-        .filter_map(|key| attributes.get(*key).map(|value| ((*key).to_owned(), value.clone())))
+        .filter_map(|key| {
+            attributes
+                .get(*key)
+                .map(|value| ((*key).to_owned(), value.clone()))
+        })
         .collect()
 }
 
-fn stable_hook_id(attributes: &Map<String, Value>, hook_name: &str) -> String {
-    let key = format!(
-        "cursor-hook|{}|{}|{}|{}|{}",
-        string_attr(attributes, "conversation_id").unwrap_or_default(),
-        string_attr(attributes, "generation_id").unwrap_or_default(),
-        hook_name,
-        string_attr(attributes, "tool_use_id")
-            .or_else(|| string_attr(attributes, "subagent_id"))
-            .unwrap_or_default(),
-        string_attr(attributes, "tool_name").unwrap_or_default(),
-    );
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
+fn stable_hook_id(payload: &Value) -> String {
+    let digest = Sha256::digest(payload.to_string().as_bytes());
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, digest.as_slice()).to_string()
 }
 
 fn is_cursor_cli_resource(attributes: &Map<String, Value>) -> bool {
@@ -233,10 +234,7 @@ mod tests {
     use serde_json::{Map, Value, json};
 
     use super::{CursorAgentAdapter, SemanticAdapter};
-    use crate::{
-        core::model::AgentEventKind,
-        ingest::otlp::OtlpLogRecord,
-    };
+    use crate::{core::model::AgentEventKind, ingest::otlp::OtlpLogRecord};
 
     #[test]
     fn normalizes_cursor_hook_without_content() {
@@ -282,6 +280,28 @@ mod tests {
     }
 
     #[test]
+    fn repeated_file_edits_get_distinct_ids() {
+        let first = json!({
+            "hook_event_name": "afterFileEdit",
+            "conversation_id": "conv-1",
+            "generation_id": "gen-1",
+            "file_path": "src/main.rs",
+            "edits": [{ "old": "a", "new": "b" }]
+        });
+        let second = json!({
+            "hook_event_name": "afterFileEdit",
+            "conversation_id": "conv-1",
+            "generation_id": "gen-1",
+            "file_path": "src/main.rs",
+            "edits": [{ "old": "b", "new": "c" }]
+        });
+
+        let first = CursorAgentAdapter.normalize_hook(&first).unwrap();
+        let second = CursorAgentAdapter.normalize_hook(&second).unwrap();
+        assert_ne!(first.id, second.id);
+    }
+
+    #[test]
     fn normalizes_enterprise_cursor_cli_log() {
         let mut attributes = Map::new();
         attributes.insert("cursor.conversation.id".into(), json!("conv-1"));
@@ -298,8 +318,8 @@ mod tests {
             .normalize_log(&OtlpLogRecord {
                 event_name: "otel.log".into(),
                 timestamp: Utc::now(),
-                trace_id: None,
-                span_id: None,
+                trace_id: Some("trace-1".into()),
+                span_id: Some("span-1".into()),
                 attributes,
                 resource_attributes: resource,
                 body: Value::String("api_request".into()),
@@ -308,6 +328,8 @@ mod tests {
 
         assert_eq!(event.kind, AgentEventKind::LlmCall);
         assert_eq!(event.session_id.as_deref(), Some("conv-1"));
+        assert_eq!(event.trace_id.as_deref(), Some("trace-1"));
+        assert_eq!(event.span_id.as_deref(), Some("span-1"));
         assert_eq!(event.input_tokens, Some(100));
         assert_eq!(event.output_tokens, Some(20));
     }
