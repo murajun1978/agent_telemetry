@@ -7,24 +7,24 @@ Agent Telemetry is a vendor- and storage-neutral observability and decision-inte
 ## Architecture
 
 ```text
-Claude Code / Codex / Gemini / ...
-              |
-              v
-      OTLP HTTP/protobuf
-              |
-              v
-     Agent Telemetry Receiver
-              |
-              v
-       Semantic Adapters
-      /       |         \
- Claude     Codex    Generic OTel
-      \       |         /
-         Canonical AgentEvent
-              |
-      TelemetryStore port
-        |           |
-   GreptimeDB    DuckDB
+Claude Code / Codex / Cursor Agent / Gemini / ...
+                  |
+                  v
+        OTLP + Agent Hooks
+                  |
+                  v
+       Agent Telemetry Receiver
+                  |
+                  v
+         Semantic Adapters
+      /       |       |        \
+ Claude     Codex   Cursor   Generic OTel
+      \       |       |        /
+          Canonical AgentEvent
+                  |
+          TelemetryStore port
+            |           |
+       GreptimeDB    DuckDB
 ```
 
 The canonical event model includes `Observation -> Decision -> Action -> Outcome -> Learning` as first-class event kinds. Vendor-specific raw data is retained on every event so semantic adapters can evolve without losing source facts.
@@ -39,8 +39,10 @@ The Rust MVP currently includes:
 - optional DuckDB storage adapter
 - JSONL import
 - OTLP HTTP/protobuf receiver for logs and traces
+- Cursor Agent hook receiver at `/v1/hooks/cursor`
 - Claude Code semantic adapter
 - Codex semantic adapter
+- Cursor Agent semantic adapter
 - generic OpenTelemetry fallback adapter
 - `atel` CLI
 
@@ -107,6 +109,38 @@ cargo run -- recent --agent codex --limit 20
 ```
 
 The Codex adapter normalizes `codex.user_prompt`, `codex.api_request`, `codex.sse_event`, `codex.tool_decision`, `codex.tool_result`, and other Codex telemetry while preserving the original attributes and raw signal. Prompt text remains disabled in the example configuration.
+
+## Quick start with Cursor Agent
+
+Cursor command hooks receive JSON over stdin. Agent Telemetry can accept these events directly at `/v1/hooks/cursor`.
+
+Start Agent Telemetry first:
+
+```bash
+cargo run -- init
+cargo run -- serve
+```
+
+For a project-level setup, copy the example hook forwarder and config into your repository:
+
+```bash
+mkdir -p .cursor/hooks
+cp examples/cursor-agent-hook.sh .cursor/hooks/agent-telemetry.sh
+cp examples/cursor-hooks.json .cursor/hooks.json
+chmod +x .cursor/hooks/agent-telemetry.sh
+```
+
+Then run Cursor Agent normally. The hook integration captures session lifecycle, prompt submission metadata, tool decisions, tool outcomes, subagents, file edits, compaction, and agent completion without storing prompt text, response text, tool inputs/outputs, or thought content by default.
+
+Inspect normalized Cursor events with:
+
+```bash
+cargo run -- recent --agent cursor-agent --limit 20
+```
+
+The hook forwarder defaults to `http://127.0.0.1:4318/v1/hooks/cursor`. Override it with `ATEL_CURSOR_HOOK_URL` when needed. Telemetry forwarding is fail-open so an unavailable collector does not block Cursor's agent loop.
+
+Cursor Enterprise can also export server-side OpenTelemetry logs. Agent Telemetry recognizes CLI exports through Cursor resource attributes such as `service.name=cursor` and `cursor.surface=cli` and normalizes model usage and hook/skill events through the same Cursor adapter.
 
 ## DuckDB backend
 
