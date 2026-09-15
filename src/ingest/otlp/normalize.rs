@@ -1,6 +1,5 @@
 use opentelemetry_proto::tonic::collector::{
-    logs::v1::ExportLogsServiceRequest,
-    trace::v1::ExportTraceServiceRequest,
+    logs::v1::ExportLogsServiceRequest, trace::v1::ExportTraceServiceRequest,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -76,11 +75,10 @@ pub(super) fn normalize_traces(
             .unwrap_or_default();
         for scope_spans in resource_spans.scope_spans {
             for span in scope_spans.spans {
-                let duration_ms = span
-                    .end_time_unix_nano
-                    .saturating_sub(span.start_time_unix_nano)
-                    as f64
-                    / 1_000_000.0;
+                let duration_ms =
+                    span.end_time_unix_nano
+                        .saturating_sub(span.start_time_unix_nano) as f64
+                        / 1_000_000.0;
                 let status = span.status.as_ref().and_then(|status| match status.code {
                     1 => Some("success".to_owned()),
                     2 => Some("error".to_owned()),
