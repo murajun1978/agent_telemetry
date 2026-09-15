@@ -17,11 +17,12 @@ impl SemanticAdapter for CodexAdapter {
         let event_name = codex_event_name(record)?;
         let short_name = event_name.strip_prefix("codex.").unwrap_or(&event_name);
         let kind = kind_for_event(short_name);
+        let is_decision = matches!(kind, AgentEventKind::Decision);
 
         let mut canonical = AgentEvent::new(self.name(), kind, short_name);
         populate_common_log_fields(&mut canonical, record);
 
-        if matches!(kind, AgentEventKind::Decision) {
+        if is_decision {
             canonical.decision = decision_context(short_name, &record.attributes);
         }
 
@@ -59,6 +60,7 @@ impl SemanticAdapter for CodexAdapter {
         } else {
             AgentEventKind::Trace
         };
+        let is_decision = matches!(kind, AgentEventKind::Decision);
 
         let mut canonical = AgentEvent::new(self.name(), kind, canonical_name);
         canonical.timestamp = record.timestamp;
@@ -102,7 +104,7 @@ impl SemanticAdapter for CodexAdapter {
             .clone()
             .or_else(|| status_from_attributes(&record.attributes));
 
-        if matches!(kind, AgentEventKind::Decision) {
+        if is_decision {
             canonical.decision = decision_context(canonical_name, &record.attributes);
         }
 
