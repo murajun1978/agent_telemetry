@@ -1,4 +1,5 @@
 mod claude;
+mod codex;
 mod generic;
 
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use crate::{
 };
 
 pub use claude::ClaudeCodeAdapter;
+pub use codex::CodexAdapter;
 pub use generic::GenericOtelAdapter;
 
 pub trait SemanticAdapter: Send + Sync {
@@ -25,7 +27,11 @@ pub struct AdapterRegistry {
 impl Default for AdapterRegistry {
     fn default() -> Self {
         Self {
-            adapters: vec![Arc::new(ClaudeCodeAdapter), Arc::new(GenericOtelAdapter)],
+            adapters: vec![
+                Arc::new(ClaudeCodeAdapter),
+                Arc::new(CodexAdapter),
+                Arc::new(GenericOtelAdapter),
+            ],
         }
     }
 }
