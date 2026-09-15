@@ -48,10 +48,7 @@ impl SemanticAdapter for ClaudeCodeAdapter {
         canonical.duration_ms = number_attr(&record.attributes, "duration_ms");
         canonical.input_tokens = u64_attr(&record.attributes, "input_tokens");
         canonical.output_tokens = u64_attr(&record.attributes, "output_tokens");
-        canonical.cost_usd = number_attr(&record.attributes, "cost_usd").or_else(|| {
-            u64_attr(&record.attributes, "cost_usd_micros")
-                .map(|micros| micros as f64 / 1_000_000.0)
-        });
+        canonical.cost_usd = cost_attr(&record.attributes);
         canonical.status = success_status(&record.attributes)
             .or_else(|| string_attr(&record.attributes, "status"));
 
@@ -61,11 +58,13 @@ impl SemanticAdapter for ClaudeCodeAdapter {
                     .tool_name
                     .as_ref()
                     .map(|name| format!("Allow tool `{name}` to execute?")),
-                evidence: string_attr(&record.attributes, "decision_source")
+                evidence: string_attr(&record.attributes, "source")
+                    .or_else(|| string_attr(&record.attributes, "decision_source"))
                     .into_iter()
                     .collect(),
                 alternatives: vec!["accept".into(), "reject".into()],
-                selected: string_attr(&record.attributes, "decision_type"),
+                selected: string_attr(&record.attributes, "decision")
+                    .or_else(|| string_attr(&record.attributes, "decision_type")),
                 constraints: Vec::new(),
                 assumptions: Vec::new(),
                 confidence: None,
@@ -116,6 +115,7 @@ impl SemanticAdapter for ClaudeCodeAdapter {
             number_attr(&record.attributes, "duration_ms").or(Some(record.duration_ms));
         canonical.input_tokens = u64_attr(&record.attributes, "input_tokens");
         canonical.output_tokens = u64_attr(&record.attributes, "output_tokens");
+        canonical.cost_usd = cost_attr(&record.attributes);
         canonical.status = record
             .status
             .clone()
@@ -125,10 +125,12 @@ impl SemanticAdapter for ClaudeCodeAdapter {
             canonical.decision = Some(DecisionContext {
                 question: Some("Allow tool execution?".into()),
                 evidence: string_attr(&record.attributes, "source")
+                    .or_else(|| string_attr(&record.attributes, "decision_source"))
                     .into_iter()
                     .collect(),
                 alternatives: vec!["accept".into(), "reject".into()],
-                selected: string_attr(&record.attributes, "decision"),
+                selected: string_attr(&record.attributes, "decision")
+                    .or_else(|| string_attr(&record.attributes, "decision_type")),
                 constraints: Vec::new(),
                 assumptions: Vec::new(),
                 confidence: None,
@@ -172,6 +174,12 @@ fn u64_attr(attributes: &serde_json::Map<String, Value>, key: &str) -> Option<u6
     })
 }
 
+fn cost_attr(attributes: &serde_json::Map<String, Value>) -> Option<f64> {
+    number_attr(attributes, "cost_usd").or_else(|| {
+        u64_attr(attributes, "cost_usd_micros").map(|micros| micros as f64 / 1_000_000.0)
+    })
+}
+
 fn success_status(attributes: &serde_json::Map<String, Value>) -> Option<String> {
     attributes.get("success").and_then(|value| match value {
         Value::Bool(true) => Some("success".into()),
@@ -185,7 +193,7 @@ fn success_status(attributes: &serde_json::Map<String, Value>) -> Option<String>
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use serde_json::{Map, json};
+    use serde_json::{Map, Value, json};
 
     use super::{ClaudeCodeAdapter, SemanticAdapter};
     use crate::{core::model::AgentEventKind, ingest::otlp::OtlpLogRecord};
@@ -214,5 +222,28 @@ mod tests {
         assert_eq!(event.session_id.as_deref(), Some("session-1"));
         assert_eq!(event.tool_name.as_deref(), Some("Bash"));
         assert_eq!(event.status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn normalizes_canonical_tool_decision_keys() {
+        let mut attributes = Map::new();
+        attributes.insert("decision".into(), json!("accept"));
+        attributes.insert("source".into(), json!("user"));
+
+        let event = ClaudeCodeAdapter
+            .normalize_log(&OtlpLogRecord {
+                event_name: "claude_code.tool_decision".into(),
+                timestamp: Utc::now(),
+                trace_id: None,
+                span_id: None,
+                attributes,
+                resource_attributes: Map::new(),
+                body: Value::Null,
+            })
+            .unwrap();
+
+        let decision = event.decision.unwrap();
+        assert_eq!(decision.selected.as_deref(), Some("accept"));
+        assert_eq!(decision.evidence, vec!["user"]);
     }
 }
