@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "sessionEnd": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "beforeSubmitPrompt": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "preToolUse": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "postToolUse": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "postToolUseFailure": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "subagentStart": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "subagentStop": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "afterFileEdit": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "afterAgentResponse": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "afterAgentThought": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "preCompact": [{ "command": ".cursor/hooks/agent-telemetry.sh" }],
+    "stop": [{ "command": ".cursor/hooks/agent-telemetry.sh" }]
+  }
+}
