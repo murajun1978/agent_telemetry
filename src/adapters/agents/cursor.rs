@@ -174,10 +174,10 @@ fn cursor_log_event_name(record: &OtlpLogRecord) -> Option<String> {
     if record.event_name.starts_with("cursor.") {
         return Some(record.event_name.clone());
     }
-    if let Some(name) = string_attr(&record.attributes, "event.name") {
-        if name.starts_with("cursor.") {
-            return Some(name);
-        }
+    if let Some(name) = string_attr(&record.attributes, "event.name")
+        && name.starts_with("cursor.")
+    {
+        return Some(name);
     }
 
     record.body.as_str().and_then(|body| match body {
