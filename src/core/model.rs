@@ -202,11 +202,8 @@ impl AgentEvent {
                 .cost_usd
                 .or_else(|| f64_attr_any(attributes, &["cost_usd", "gen_ai.usage.cost_usd"]))
                 .or_else(|| {
-                    u64_attr_any(
-                        attributes,
-                        &["cost_usd_micros", "codex.turn.cost_microusd"],
-                    )
-                    .map(|micros| micros as f64 / 1_000_000.0)
+                    u64_attr_any(attributes, &["cost_usd_micros", "codex.turn.cost_microusd"])
+                        .map(|micros| micros as f64 / 1_000_000.0)
                 });
             usage.cached_input_tokens = usage.cached_input_tokens.or_else(|| {
                 u64_attr_any(
