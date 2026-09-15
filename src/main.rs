@@ -5,7 +5,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use agent_telemetry::{
     adapters::{greptime::GreptimeStore, jsonl},
-    core::store::{EventQuery, TelemetryStore},
+    core::{
+        analytics::analyze_session,
+        store::{EventQuery, TelemetryStore},
+    },
     ingest::otlp,
 };
 
@@ -61,6 +64,14 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    Analyze {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value_t = 1000)]
+        limit: usize,
+    },
     Serve {
         #[arg(long, env = "ATEL_OTLP_BIND", default_value = "127.0.0.1:4318")]
         bind: SocketAddr,
@@ -79,7 +90,10 @@ async fn main() -> Result<()> {
         }
         Command::Import { path } => {
             store.init().await?;
-            let events = jsonl::read_events(path).await?;
+            let mut events = jsonl::read_events(path).await?;
+            for event in &mut events {
+                event.hydrate_token_usage();
+            }
             store.append(&events).await?;
             println!("imported {} events into {}", events.len(), store.name());
         }
@@ -98,6 +112,22 @@ async fn main() -> Result<()> {
             for event in events {
                 println!("{}", serde_json::to_string(&event)?);
             }
+        }
+        Command::Analyze {
+            session,
+            agent,
+            limit,
+        } => {
+            let events = store
+                .recent(&EventQuery {
+                    agent,
+                    session_id: Some(session.clone()),
+                    limit,
+                })
+                .await?;
+            let report = analyze_session(&events)
+                .ok_or_else(|| anyhow::anyhow!("no telemetry found for session {session}"))?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::Serve { bind } => {
             store.init().await?;
