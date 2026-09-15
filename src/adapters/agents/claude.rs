@@ -48,11 +48,10 @@ impl SemanticAdapter for ClaudeCodeAdapter {
         canonical.duration_ms = number_attr(&record.attributes, "duration_ms");
         canonical.input_tokens = u64_attr(&record.attributes, "input_tokens");
         canonical.output_tokens = u64_attr(&record.attributes, "output_tokens");
-        canonical.cost_usd = number_attr(&record.attributes, "cost_usd")
-            .or_else(|| {
-                u64_attr(&record.attributes, "cost_usd_micros")
-                    .map(|micros| micros as f64 / 1_000_000.0)
-            });
+        canonical.cost_usd = number_attr(&record.attributes, "cost_usd").or_else(|| {
+            u64_attr(&record.attributes, "cost_usd_micros")
+                .map(|micros| micros as f64 / 1_000_000.0)
+        });
         canonical.status = success_status(&record.attributes)
             .or_else(|| string_attr(&record.attributes, "status"));
 
@@ -113,11 +112,14 @@ impl SemanticAdapter for ClaudeCodeAdapter {
             .or_else(|| string_attr(&record.attributes, "gen_ai.request.model"));
         canonical.tool_name = string_attr(&record.attributes, "tool_name")
             .or_else(|| string_attr(&record.attributes, "gen_ai.tool.name"));
-        canonical.duration_ms = number_attr(&record.attributes, "duration_ms")
-            .or(Some(record.duration_ms));
+        canonical.duration_ms =
+            number_attr(&record.attributes, "duration_ms").or(Some(record.duration_ms));
         canonical.input_tokens = u64_attr(&record.attributes, "input_tokens");
         canonical.output_tokens = u64_attr(&record.attributes, "output_tokens");
-        canonical.status = record.status.clone().or_else(|| success_status(&record.attributes));
+        canonical.status = record
+            .status
+            .clone()
+            .or_else(|| success_status(&record.attributes));
 
         if span_name == "tool.blocked_on_user" {
             canonical.decision = Some(DecisionContext {
