@@ -578,11 +578,7 @@ mod tests {
         codex_two.output_tokens = Some(10);
         codex_two.cost_usd = Some(0.01);
 
-        let mut gemini = AgentEvent::new(
-            "gemini-cli",
-            AgentEventKind::LlmCall,
-            "generate_content",
-        );
+        let mut gemini = AgentEvent::new("gemini-cli", AgentEventKind::LlmCall, "generate_content");
         gemini.session_id = Some("gemini-1".into());
         gemini.model = Some("shared-model".into());
         gemini.input_tokens = Some(120);
