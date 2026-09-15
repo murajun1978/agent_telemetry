@@ -50,7 +50,7 @@ impl TelemetryStore for DuckDbStore {
                     event.id,
                     event.agent,
                     event.session_id,
-                    format!("{:?}", event.kind).to_lowercase(),
+                    event.kind.as_str(),
                     event.name,
                     serde_json::to_string(event)?,
                     event.timestamp.to_rfc3339(),
