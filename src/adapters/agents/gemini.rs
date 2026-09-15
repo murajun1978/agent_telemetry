@@ -21,6 +21,7 @@ impl SemanticAdapter for GeminiCliAdapter {
             .unwrap_or(&event_name);
         let kind = kind_for_log(short_name);
         let is_decision = matches!(kind, AgentEventKind::Decision);
+        let safe_attributes = redact_sensitive_attributes(&record.attributes);
 
         let mut event = AgentEvent::new(self.name(), kind, short_name);
         event.timestamp = record.timestamp;
@@ -55,10 +56,9 @@ impl SemanticAdapter for GeminiCliAdapter {
         event.status = status_for_log(short_name, &record.attributes);
 
         if is_decision {
-            event.decision = decision_context(short_name, &record.attributes);
+            event.decision = decision_context(short_name, &safe_attributes);
         }
 
-        let safe_attributes = redact_sensitive_attributes(&record.attributes);
         event.attributes = Value::Object(safe_attributes.clone());
         event.raw = json!({
             "signal": "log",
@@ -143,8 +143,8 @@ fn kind_for_log(name: &str) -> AgentEventKind {
 fn kind_for_operation(operation: &str) -> AgentEventKind {
     match operation {
         "user_prompt" | "system_prompt" => AgentEventKind::Observation,
-        "llm_call" => AgentEventKind::LlmCall,
-        "tool_call" | "schedule_tool_calls" => AgentEventKind::ToolCall,
+        "llm_call" | "chat" | "generate_content" => AgentEventKind::LlmCall,
+        "tool_call" | "schedule_tool_calls" | "execute_tool" => AgentEventKind::ToolCall,
         "agent_call" => AgentEventKind::Trace,
         _ => AgentEventKind::Trace,
     }
@@ -169,7 +169,7 @@ fn decision_context(name: &str, attributes: &Map<String, Value>) -> Option<Decis
         "conseca.verdict" => Some(DecisionContext {
             question: string_attr(attributes, "tool_name")
                 .map(|tool| format!("Allow Gemini CLI tool `{tool}`?")),
-            evidence: string_attr(attributes, "reason").into_iter().collect(),
+            evidence: Vec::new(),
             alternatives: vec!["accept".into(), "reject".into(), "modify".into()],
             selected: string_attr(attributes, "decision"),
             constraints: string_attr(attributes, "verdict").into_iter().collect(),
@@ -185,16 +185,34 @@ fn status_for_log(name: &str, attributes: &Map<String, Value>) -> Option<String>
     if let Some(status) = string_attr(attributes, "status") {
         return Some(status);
     }
+
+    if let Some(failed) = attributes.get("failed") {
+        match failed {
+            Value::Bool(true) => return Some("error".into()),
+            Value::Bool(false) => return Some("success".into()),
+            Value::String(value) if value == "true" => return Some("error".into()),
+            Value::String(value) if value == "false" => return Some("success".into()),
+            _ => {}
+        }
+    }
+
     if let Some(success) = attributes.get("success") {
         match success {
             Value::Bool(true) => return Some("success".into()),
             Value::Bool(false) => return Some("error".into()),
+            Value::String(value) if value == "true" => return Some("success".into()),
+            Value::String(value) if value == "false" => return Some("error".into()),
             _ => {}
         }
     }
-    if name == "api_error" || attributes.contains_key("error.message") {
+
+    if name == "api_error"
+        || attributes.contains_key("error.message")
+        || attributes.contains_key("error_message")
+    {
         return Some("error".into());
     }
+
     attributes
         .get("status_code")
         .and_then(|value| match value {
@@ -226,8 +244,11 @@ fn redact_sensitive_attributes(attributes: &Map<String, Value>) -> Map<String, V
         "gen_ai.system_instructions",
         "gen_ai.tool.definitions",
         "gen_ai.tool.description",
+        "gen_ai.tool.call.arguments",
+        "reason",
         "reasoning",
         "error.message",
+        "error_message",
     ];
 
     attributes
@@ -281,6 +302,18 @@ mod tests {
         ingest::otlp::{OtlpLogRecord, OtlpSpanRecord},
     };
 
+    fn log_record(event_name: &str, attributes: Map<String, Value>) -> OtlpLogRecord {
+        OtlpLogRecord {
+            event_name: event_name.into(),
+            timestamp: Utc::now(),
+            trace_id: None,
+            span_id: None,
+            attributes,
+            resource_attributes: Map::new(),
+            body: Value::Null,
+        }
+    }
+
     #[test]
     fn normalizes_user_prompt_without_prompt_content() {
         let mut attributes = Map::new();
@@ -291,15 +324,7 @@ mod tests {
         attributes.insert("user.email".into(), json!("person@example.com"));
 
         let event = GeminiCliAdapter
-            .normalize_log(&OtlpLogRecord {
-                event_name: "gemini_cli.user_prompt".into(),
-                timestamp: Utc::now(),
-                trace_id: None,
-                span_id: None,
-                attributes,
-                resource_attributes: Map::new(),
-                body: Value::Null,
-            })
+            .normalize_log(&log_record("gemini_cli.user_prompt", attributes))
             .unwrap();
 
         assert_eq!(event.kind, AgentEventKind::Observation);
@@ -316,20 +341,12 @@ mod tests {
         attributes.insert("prompt_id".into(), json!("prompt-1"));
         attributes.insert("function_name".into(), json!("run_shell_command"));
         attributes.insert("duration_ms".into(), json!(15));
-        attributes.insert("success".into(), json!(true));
+        attributes.insert("success".into(), json!("true"));
         attributes.insert("decision".into(), json!("accept"));
         attributes.insert("function_args".into(), json!("{\"command\":\"cat .env\"}"));
 
         let event = GeminiCliAdapter
-            .normalize_log(&OtlpLogRecord {
-                event_name: "gemini_cli.tool_call".into(),
-                timestamp: Utc::now(),
-                trace_id: None,
-                span_id: None,
-                attributes,
-                resource_attributes: Map::new(),
-                body: Value::Null,
-            })
+            .normalize_log(&log_record("gemini_cli.tool_call", attributes))
             .unwrap();
 
         assert_eq!(event.kind, AgentEventKind::ToolCall);
@@ -340,38 +357,81 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_model_routing_decision() {
+    fn normalizes_model_routing_failure_without_error_text() {
         let mut attributes = Map::new();
         attributes.insert("decision_model".into(), json!("gemini-2.5-flash"));
         attributes.insert("decision_source".into(), json!("fallback"));
         attributes.insert("reasoning".into(), json!("quota exhausted"));
+        attributes.insert("error_message".into(), json!("private backend detail"));
+        attributes.insert("failed".into(), json!(true));
 
         let event = GeminiCliAdapter
-            .normalize_log(&OtlpLogRecord {
-                event_name: "gemini_cli.model_routing".into(),
-                timestamp: Utc::now(),
-                trace_id: None,
-                span_id: None,
-                attributes,
-                resource_attributes: Map::new(),
-                body: Value::Null,
-            })
+            .normalize_log(&log_record("gemini_cli.model_routing", attributes))
             .unwrap();
 
         assert_eq!(event.kind, AgentEventKind::Decision);
         assert_eq!(event.model.as_deref(), Some("gemini-2.5-flash"));
+        assert_eq!(event.status.as_deref(), Some("error"));
         assert_eq!(
             event.decision.unwrap().selected.as_deref(),
             Some("gemini-2.5-flash")
         );
         assert!(event.attributes.get("reasoning").is_none());
+        assert!(event.attributes.get("error_message").is_none());
+    }
+
+    #[test]
+    fn conseca_reason_does_not_leak_into_decision() {
+        let mut attributes = Map::new();
+        attributes.insert("tool_name".into(), json!("run_shell_command"));
+        attributes.insert("decision".into(), json!("reject"));
+        attributes.insert("verdict".into(), json!("blocked"));
+        attributes.insert("reason".into(), json!("sensitive policy rationale"));
+
+        let event = GeminiCliAdapter
+            .normalize_log(&log_record("gemini_cli.conseca.verdict", attributes))
+            .unwrap();
+
+        let decision = event.decision.unwrap();
+        assert!(decision.evidence.is_empty());
+        assert!(event.attributes.get("reason").is_none());
+    }
+
+    #[test]
+    fn normalizes_standard_genai_operations_and_redacts_tool_arguments() {
+        let mut attributes = Map::new();
+        attributes.insert("gen_ai.agent.name".into(), json!("gemini-cli"));
+        attributes.insert("gen_ai.operation.name".into(), json!("execute_tool"));
+        attributes.insert("gen_ai.conversation.id".into(), json!("session-1"));
+        attributes.insert("gen_ai.tool.name".into(), json!("run_shell_command"));
+        attributes.insert(
+            "gen_ai.tool.call.arguments".into(),
+            json!("{\"command\":\"cat .env\"}"),
+        );
+
+        let event = GeminiCliAdapter
+            .normalize_span(&OtlpSpanRecord {
+                name: "execute_tool run_shell_command".into(),
+                timestamp: Utc::now(),
+                trace_id: "trace-1".into(),
+                span_id: "span-1".into(),
+                parent_span_id: None,
+                duration_ms: 12.0,
+                status: Some("success".into()),
+                attributes,
+                resource_attributes: Map::new(),
+            })
+            .unwrap();
+
+        assert_eq!(event.kind, AgentEventKind::ToolCall);
+        assert!(event.attributes.get("gen_ai.tool.call.arguments").is_none());
     }
 
     #[test]
     fn normalizes_genai_trace() {
         let mut attributes = Map::new();
         attributes.insert("gen_ai.agent.name".into(), json!("gemini-cli"));
-        attributes.insert("gen_ai.operation.name".into(), json!("llm_call"));
+        attributes.insert("gen_ai.operation.name".into(), json!("generate_content"));
         attributes.insert("gen_ai.conversation.id".into(), json!("session-1"));
         attributes.insert("gen_ai.request.model".into(), json!("gemini-2.5-pro"));
         attributes.insert("gen_ai.usage.input_tokens".into(), json!(100));
