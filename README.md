@@ -25,6 +25,9 @@ Claude   Codex   Cursor  Gemini  Generic OTel
             TelemetryStore port
               |           |
          GreptimeDB    DuckDB
+                    |
+                    v
+         Token + Decision Analytics
 ```
 
 The canonical event model includes `Observation -> Decision -> Action -> Outcome -> Learning` as first-class event kinds. Vendor-specific raw data is retained on every event so semantic adapters can evolve without losing source facts.
@@ -33,7 +36,7 @@ The canonical event model includes `Observation -> Decision -> Action -> Outcome
 
 The Rust MVP currently includes:
 
-- canonical `AgentEvent` and `DecisionContext` models
+- canonical `AgentEvent`, `DecisionContext`, and `TokenUsage` models
 - declarative storage boundary via `TelemetryStore`
 - GreptimeDB storage adapter
 - optional DuckDB storage adapter
@@ -45,6 +48,8 @@ The Rust MVP currently includes:
 - Cursor Agent semantic adapter
 - Gemini CLI semantic adapter
 - generic OpenTelemetry fallback adapter
+- session/turn token analytics and Decision -> Action -> Outcome flow correlation
+- token-efficiency metrics such as tokens per success and retry token ratio
 - `atel` CLI
 
 ## Quick start with Claude Code
@@ -184,6 +189,32 @@ The Gemini adapter maps prompt submission, tool execution, API calls, model rout
 
 `telemetry.logPrompts` defaults to enabled in Gemini CLI, so the example explicitly disables it. Detailed trace collection is opt-in and enabled here to capture GenAI operation spans; Agent Telemetry still strips content-bearing trace attributes before storing them.
 
+## Token and decision analytics
+
+`TokenUsage` keeps input/output tokens canonical while also supporting optional cached-input, reasoning-token, cost, and vendor-specific breakdowns. Existing events that only contain the legacy `input_tokens`, `output_tokens`, and `cost_usd` fields remain analyzable; Agent Telemetry hydrates the richer model when ingesting or analyzing them.
+
+Analyze one session:
+
+```bash
+cargo run -- analyze --session <session-id> --agent codex
+```
+
+The JSON report includes:
+
+- total input/output/cached/reasoning tokens and cost
+- token totals by model
+- per-turn token totals
+- Decision / Action / ToolCall / Outcome / Error counts
+- an ordered Decision -> Action/ToolCall -> Outcome flow per turn
+- successful outcomes and retries
+- `tokens_per_success`
+- `cost_per_success`
+- `tokens_per_decision`
+- `tokens_per_tool_call`
+- `retry_token_ratio`
+
+This keeps token analysis tied to agent behavior and outcomes instead of treating token consumption as a standalone cost metric.
+
 ## DuckDB backend
 
 ```bash
@@ -208,11 +239,12 @@ cargo run --features duckdb-backend -- \
 atel init
 atel import <events.jsonl>
 atel recent [--agent <name>] [--session <id>] [--limit <n>]
+atel analyze --session <id> [--agent <name>] [--limit <n>]
 atel serve [--bind 127.0.0.1:4318]
 ```
 
 ## Next
 
 - OTLP metrics receiver
-- Decision -> Action -> Outcome correlation queries
+- cross-session / cross-agent efficiency comparisons
 - MCP query interface
