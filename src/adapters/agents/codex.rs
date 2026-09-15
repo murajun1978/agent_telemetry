@@ -37,8 +37,8 @@ impl SemanticAdapter for CodexAdapter {
     }
 
     fn normalize_span(&self, record: &OtlpSpanRecord) -> Option<AgentEvent> {
-        let event_name = string_attr(&record.attributes, "event.name")
-            .filter(|name| name.starts_with("codex."));
+        let event_name =
+            string_attr(&record.attributes, "event.name").filter(|name| name.starts_with("codex."));
         let is_codex_span = event_name.is_some()
             || record.name.starts_with("codex.")
             || codex_service(&record.resource_attributes)
@@ -62,31 +62,22 @@ impl SemanticAdapter for CodexAdapter {
 
         let mut canonical = AgentEvent::new(self.name(), kind, canonical_name);
         canonical.timestamp = record.timestamp;
-        canonical.agent_version = string_attr_any(
-            &record.attributes,
-            &["app.version", "service.version"],
-        )
-        .or_else(|| string_attr(&record.resource_attributes, "service.version"));
+        canonical.agent_version =
+            string_attr_any(&record.attributes, &["app.version", "service.version"])
+                .or_else(|| string_attr(&record.resource_attributes, "service.version"));
         canonical.session_id = string_attr_any(
             &record.attributes,
             &["conversation.id", "thread.id", "session.id"],
         );
-        canonical.turn_id = string_attr_any(
-            &record.attributes,
-            &["turn_id", "turn.id", "prompt.id"],
-        );
+        canonical.turn_id =
+            string_attr_any(&record.attributes, &["turn_id", "turn.id", "prompt.id"]);
         canonical.trace_id = Some(record.trace_id.clone());
         canonical.span_id = Some(record.span_id.clone());
-        canonical.model = string_attr_any(
-            &record.attributes,
-            &["model", "gen_ai.request.model"],
-        );
-        canonical.tool_name = string_attr_any(
-            &record.attributes,
-            &["tool_name", "gen_ai.tool.name"],
-        );
-        canonical.duration_ms = number_attr(&record.attributes, "duration_ms")
-            .or(Some(record.duration_ms));
+        canonical.model = string_attr_any(&record.attributes, &["model", "gen_ai.request.model"]);
+        canonical.tool_name =
+            string_attr_any(&record.attributes, &["tool_name", "gen_ai.tool.name"]);
+        canonical.duration_ms =
+            number_attr(&record.attributes, "duration_ms").or(Some(record.duration_ms));
         canonical.input_tokens = u64_attr_any(
             &record.attributes,
             &[
@@ -129,7 +120,12 @@ impl SemanticAdapter for CodexAdapter {
 fn codex_event_name(record: &OtlpLogRecord) -> Option<String> {
     string_attr(&record.attributes, "event.name")
         .filter(|name| name.starts_with("codex."))
-        .or_else(|| record.event_name.starts_with("codex.").then(|| record.event_name.clone()))
+        .or_else(|| {
+            record
+                .event_name
+                .starts_with("codex.")
+                .then(|| record.event_name.clone())
+        })
 }
 
 fn kind_for_event(name: &str) -> AgentEventKind {
@@ -155,20 +151,11 @@ fn populate_common_log_fields(event: &mut AgentEvent, record: &OtlpLogRecord) {
         &record.attributes,
         &["conversation.id", "thread.id", "session.id"],
     );
-    event.turn_id = string_attr_any(
-        &record.attributes,
-        &["turn_id", "turn.id", "prompt.id"],
-    );
+    event.turn_id = string_attr_any(&record.attributes, &["turn_id", "turn.id", "prompt.id"]);
     event.trace_id = record.trace_id.clone();
     event.span_id = record.span_id.clone();
-    event.model = string_attr_any(
-        &record.attributes,
-        &["model", "gen_ai.request.model"],
-    );
-    event.tool_name = string_attr_any(
-        &record.attributes,
-        &["tool_name", "gen_ai.tool.name"],
-    );
+    event.model = string_attr_any(&record.attributes, &["model", "gen_ai.request.model"]);
+    event.tool_name = string_attr_any(&record.attributes, &["tool_name", "gen_ai.tool.name"]);
     event.duration_ms = number_attr(&record.attributes, "duration_ms");
     event.input_tokens = u64_attr_any(
         &record.attributes,
@@ -222,8 +209,7 @@ fn decision_context(name: &str, attributes: &Map<String, Value>) -> Option<Decis
 fn cost_usd(attributes: &Map<String, Value>) -> Option<f64> {
     number_attr(attributes, "cost_usd")
         .or_else(|| {
-            u64_attr(attributes, "cost_usd_micros")
-                .map(|micros| micros as f64 / 1_000_000.0)
+            u64_attr(attributes, "cost_usd_micros").map(|micros| micros as f64 / 1_000_000.0)
         })
         .or_else(|| {
             u64_attr(attributes, "codex.turn.cost_microusd")
