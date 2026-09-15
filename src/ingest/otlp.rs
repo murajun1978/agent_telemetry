@@ -81,9 +81,10 @@ async fn receive_cursor_hook(
     Json(payload): Json<Value>,
 ) -> Response {
     let adapter = CursorAgentAdapter;
-    let Some(event) = adapter.normalize_hook(&payload) else {
+    let Some(mut event) = adapter.normalize_hook(&payload) else {
         return bad_request("invalid Cursor hook payload".into());
     };
+    event.hydrate_token_usage();
 
     if let Err(error) = state.store.append(&[event]).await {
         return server_error(format!("failed to store Cursor hook event: {error:#}"));
@@ -163,6 +164,7 @@ fn normalize_logs(
                 };
                 if let Some(mut event) = registry.normalize_log(&normalized) {
                     event.id = stable_log_id(&normalized, source_time);
+                    event.hydrate_token_usage();
                     events.push(event);
                 }
             }
@@ -205,6 +207,7 @@ fn normalize_traces(
                 };
                 if let Some(mut event) = registry.normalize_span(&normalized) {
                     event.id = stable_span_id(&normalized);
+                    event.hydrate_token_usage();
                     events.push(event);
                 }
             }
