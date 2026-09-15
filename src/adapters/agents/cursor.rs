@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     adapters::agents::SemanticAdapter,
-    core::model::{AgentEvent, AgentEventKind, DecisionContext},
+    core::model::{AgentEvent, AgentEventKind, DecisionContext, TokenUsage},
     ingest::otlp::{OtlpLogRecord, OtlpSpanRecord},
 };
 
@@ -29,6 +29,21 @@ impl CursorAgentAdapter {
         event.duration_ms =
             number_attr(attributes, "duration").or_else(|| number_attr(attributes, "duration_ms"));
         event.status = status_for_hook(attributes, &hook_name);
+        event.input_tokens = u64_attr(attributes, "input_tokens");
+        event.output_tokens = u64_attr(attributes, "output_tokens");
+        event.cost_usd = number_attr(attributes, "cost_usd");
+
+        let hook_token_usage = TokenUsage {
+            input_tokens: event.input_tokens,
+            output_tokens: event.output_tokens,
+            cached_input_tokens: u64_attr(attributes, "cached_input_tokens"),
+            reasoning_tokens: u64_attr(attributes, "reasoning_tokens"),
+            cost_usd: event.cost_usd,
+            breakdown: Value::Null,
+        };
+        if !hook_token_usage.is_empty() {
+            event.token_usage = Some(hook_token_usage);
+        }
 
         if is_decision {
             event.decision = Some(DecisionContext {
@@ -259,6 +274,32 @@ mod tests {
         assert!(event.attributes.get("agent_message").is_none());
         assert!(event.attributes.get("user_email").is_none());
         assert_eq!(event.raw["content_redacted"], json!(true));
+    }
+
+    #[test]
+    fn preserves_cursor_hook_token_usage_before_redaction() {
+        let payload = json!({
+            "hook_event_name": "afterAgentResponse",
+            "conversation_id": "conv-1",
+            "generation_id": "gen-1",
+            "input_tokens": 100,
+            "output_tokens": 25,
+            "cached_input_tokens": 40,
+            "reasoning_tokens": 5,
+            "cost_usd": 0.01,
+            "agent_message": "secret response"
+        });
+
+        let event = CursorAgentAdapter.normalize_hook(&payload).unwrap();
+        let usage = event.token_usage.unwrap();
+
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(25));
+        assert_eq!(usage.cached_input_tokens, Some(40));
+        assert_eq!(usage.reasoning_tokens, Some(5));
+        assert_eq!(usage.cost_usd, Some(0.01));
+        assert!(event.attributes.get("agent_message").is_none());
+        assert!(event.attributes.get("input_tokens").is_none());
     }
 
     #[test]
