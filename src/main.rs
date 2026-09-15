@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use agent_telemetry::{
     adapters::{greptime::GreptimeStore, jsonl},
     core::{
-        analytics::analyze_session,
+        analytics::{analyze_session, compare_events},
         store::{EventQuery, TelemetryStore},
     },
     ingest::otlp,
@@ -72,6 +72,12 @@ enum Command {
         #[arg(long, default_value_t = 1000)]
         limit: usize,
     },
+    Compare {
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value_t = 5000)]
+        limit: usize,
+    },
     Serve {
         #[arg(long, env = "ATEL_OTLP_BIND", default_value = "127.0.0.1:4318")]
         bind: SocketAddr,
@@ -127,6 +133,17 @@ async fn main() -> Result<()> {
                 .await?;
             let report = analyze_session(&events)
                 .ok_or_else(|| anyhow::anyhow!("no telemetry found for session {session}"))?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::Compare { agent, limit } => {
+            let events = store
+                .recent(&EventQuery {
+                    agent,
+                    session_id: None,
+                    limit,
+                })
+                .await?;
+            let report = compare_events(&events);
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::Serve { bind } => {
