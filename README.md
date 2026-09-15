@@ -7,24 +7,24 @@ Agent Telemetry is a vendor- and storage-neutral observability and decision-inte
 ## Architecture
 
 ```text
-Claude Code / Codex / Cursor Agent / Gemini / ...
-                  |
-                  v
-        OTLP + Agent Hooks
-                  |
-                  v
-       Agent Telemetry Receiver
-                  |
-                  v
-         Semantic Adapters
-      /       |       |        \
- Claude     Codex   Cursor   Generic OTel
-      \       |       |        /
-          Canonical AgentEvent
-                  |
-          TelemetryStore port
-            |           |
-       GreptimeDB    DuckDB
+Claude Code / Codex / Cursor Agent / Gemini CLI / ...
+                    |
+                    v
+          OTLP + Agent Hooks
+                    |
+                    v
+         Agent Telemetry Receiver
+                    |
+                    v
+           Semantic Adapters
+   /       |       |       |        \
+Claude   Codex   Cursor  Gemini  Generic OTel
+   \       |       |       |        /
+             Canonical AgentEvent
+                    |
+            TelemetryStore port
+              |           |
+         GreptimeDB    DuckDB
 ```
 
 The canonical event model includes `Observation -> Decision -> Action -> Outcome -> Learning` as first-class event kinds. Vendor-specific raw data is retained on every event so semantic adapters can evolve without losing source facts.
@@ -43,6 +43,7 @@ The Rust MVP currently includes:
 - Claude Code semantic adapter
 - Codex semantic adapter
 - Cursor Agent semantic adapter
+- Gemini CLI semantic adapter
 - generic OpenTelemetry fallback adapter
 - `atel` CLI
 
@@ -142,6 +143,47 @@ The hook forwarder defaults to `http://127.0.0.1:4318/v1/hooks/cursor`. Override
 
 Cursor Enterprise can also export server-side OpenTelemetry logs. Agent Telemetry recognizes CLI exports through Cursor resource attributes such as `service.name=cursor` and `cursor.surface=cli` and normalizes model usage and hook/skill events through the same Cursor adapter.
 
+## Quick start with Gemini CLI
+
+Gemini CLI can export OpenTelemetry directly over OTLP HTTP. Start Agent Telemetry first:
+
+```bash
+cargo run -- init
+cargo run -- serve
+```
+
+Then configure `.gemini/settings.json`:
+
+```json
+{
+  "telemetry": {
+    "enabled": true,
+    "target": "local",
+    "otlpEndpoint": "http://127.0.0.1:4318",
+    "otlpProtocol": "http",
+    "useCollector": true,
+    "logPrompts": false,
+    "traces": true
+  }
+}
+```
+
+Run Gemini CLI normally:
+
+```bash
+gemini
+```
+
+Inspect normalized events with:
+
+```bash
+cargo run -- recent --agent gemini-cli --limit 20
+```
+
+The Gemini adapter maps prompt submission, tool execution, API calls, model routing, security verdicts, file operations, and GenAI spans into the canonical event model. Sensitive attributes such as user email, prompt/response text, tool arguments, GenAI input/output messages, system instructions, tool definitions, and model-routing reasoning are removed before persistence.
+
+`telemetry.logPrompts` defaults to enabled in Gemini CLI, so the example explicitly disables it. Detailed trace collection is opt-in and enabled here to capture GenAI operation spans; Agent Telemetry still strips content-bearing trace attributes before storing them.
+
 ## DuckDB backend
 
 ```bash
@@ -172,6 +214,5 @@ atel serve [--bind 127.0.0.1:4318]
 ## Next
 
 - OTLP metrics receiver
-- Gemini CLI semantic adapter
 - Decision -> Action -> Outcome correlation queries
 - MCP query interface
