@@ -2,7 +2,7 @@ use std::{path::Path, sync::Mutex};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use duckdb::{params, Connection};
+use duckdb::{Connection, params};
 
 use crate::core::{
     model::AgentEvent,
