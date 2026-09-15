@@ -341,7 +341,10 @@ pub fn compare_events(events: &[AgentEvent]) -> ComparisonReport {
                 rollup.aggregate.tokens.total_tokens,
                 rollup.sessions,
             ),
-            average_cost_per_session: float_ratio(rollup.aggregate.tokens.cost_usd, rollup.sessions),
+            average_cost_per_session: float_ratio(
+                rollup.aggregate.tokens.cost_usd,
+                rollup.sessions,
+            ),
             tokens_per_successful_session: ratio(
                 rollup.aggregate.tokens.total_tokens,
                 rollup.successful_sessions,
@@ -536,8 +539,7 @@ mod tests {
         gemini_llm.output_tokens = Some(30);
         gemini_llm.cost_usd = Some(0.03);
 
-        let mut gemini_outcome =
-            AgentEvent::new("gemini-cli", AgentEventKind::Outcome, "finish");
+        let mut gemini_outcome = AgentEvent::new("gemini-cli", AgentEventKind::Outcome, "finish");
         gemini_outcome.session_id = Some("gemini-1".into());
         gemini_outcome.status = Some("error".into());
 
