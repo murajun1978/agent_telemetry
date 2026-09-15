@@ -1,5 +1,4 @@
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -162,8 +161,7 @@ fn safe_hook_attributes(attributes: &Map<String, Value>) -> Map<String, Value> {
 }
 
 fn stable_hook_id(payload: &Value) -> String {
-    let digest = Sha256::digest(payload.to_string().as_bytes());
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, digest.as_slice()).to_string()
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, payload.to_string().as_bytes()).to_string()
 }
 
 fn is_cursor_cli_resource(attributes: &Map<String, Value>) -> bool {
