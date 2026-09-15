@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use agent_telemetry::{
@@ -24,14 +24,22 @@ struct Cli {
     #[arg(long, value_enum, env = "ATEL_BACKEND", default_value = "greptime")]
     backend: Backend,
 
-    #[arg(long, env = "ATEL_GREPTIME_ENDPOINT", default_value = "http://127.0.0.1:4000")]
+    #[arg(
+        long,
+        env = "ATEL_GREPTIME_ENDPOINT",
+        default_value = "http://127.0.0.1:4000"
+    )]
     greptime_endpoint: String,
 
     #[arg(long, env = "ATEL_GREPTIME_DATABASE", default_value = "public")]
     greptime_database: String,
 
     #[cfg(feature = "duckdb-backend")]
-    #[arg(long, env = "ATEL_DUCKDB_PATH", default_value = "agent_telemetry.duckdb")]
+    #[arg(
+        long,
+        env = "ATEL_DUCKDB_PATH",
+        default_value = "agent_telemetry.duckdb"
+    )]
     duckdb_path: PathBuf,
 
     #[command(subcommand)]
