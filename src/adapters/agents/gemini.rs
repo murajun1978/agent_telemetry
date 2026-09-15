@@ -16,7 +16,9 @@ impl SemanticAdapter for GeminiCliAdapter {
 
     fn normalize_log(&self, record: &OtlpLogRecord) -> Option<AgentEvent> {
         let event_name = gemini_event_name(record)?;
-        let short_name = event_name.strip_prefix("gemini_cli.").unwrap_or(&event_name);
+        let short_name = event_name
+            .strip_prefix("gemini_cli.")
+            .unwrap_or(&event_name);
         let kind = kind_for_log(short_name);
         let is_decision = matches!(kind, AgentEventKind::Decision);
 
@@ -29,7 +31,12 @@ impl SemanticAdapter for GeminiCliAdapter {
         event.span_id = record.span_id.clone();
         event.model = string_attr_any(
             &record.attributes,
-            &["model", "model_name", "decision_model", "gen_ai.request.model"],
+            &[
+                "model",
+                "model_name",
+                "decision_model",
+                "gen_ai.request.model",
+            ],
         );
         event.tool_name = string_attr_any(
             &record.attributes,
@@ -122,7 +129,9 @@ fn kind_for_log(name: &str) -> AgentEventKind {
         "user_prompt" => AgentEventKind::Observation,
         "tool_call" | "hook_call" => AgentEventKind::ToolCall,
         "api_request" | "api_response" => AgentEventKind::LlmCall,
-        "api_error" | "malformed_json_response" | "chat.invalid_chunk"
+        "api_error"
+        | "malformed_json_response"
+        | "chat.invalid_chunk"
         | "chat.content_retry_failure" => AgentEventKind::Error,
         "model_routing" | "conseca.verdict" => AgentEventKind::Decision,
         "file_operation" | "slash_command" | "plan_execution" => AgentEventKind::Action,
@@ -351,7 +360,10 @@ mod tests {
 
         assert_eq!(event.kind, AgentEventKind::Decision);
         assert_eq!(event.model.as_deref(), Some("gemini-2.5-flash"));
-        assert_eq!(event.decision.unwrap().selected.as_deref(), Some("gemini-2.5-flash"));
+        assert_eq!(
+            event.decision.unwrap().selected.as_deref(),
+            Some("gemini-2.5-flash")
+        );
         assert!(event.attributes.get("reasoning").is_none());
     }
 
