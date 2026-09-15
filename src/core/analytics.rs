@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::model::{AgentEvent, AgentEventKind};
@@ -36,6 +37,19 @@ pub struct TokenEfficiency {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FlowEvent {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub kind: AgentEventKind,
+    pub name: String,
+    pub status: Option<String>,
+    pub tool_name: Option<String>,
+    pub model: Option<String>,
+    pub tokens: u64,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TurnAnalytics {
     pub turn_id: Option<String>,
     pub tokens: TokenTotals,
@@ -47,6 +61,7 @@ pub struct TurnAnalytics {
     pub errors: usize,
     pub retries: usize,
     pub efficiency: TokenEfficiency,
+    pub flow: Vec<FlowEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -77,6 +92,7 @@ struct Aggregate {
     errors: usize,
     retries: usize,
     retry_tokens: u64,
+    flow: Vec<FlowEvent>,
 }
 
 impl Aggregate {
@@ -97,6 +113,27 @@ impl Aggregate {
             }
             AgentEventKind::Error => self.errors += 1,
             _ => {}
+        }
+
+        if matches!(
+            event.kind,
+            AgentEventKind::Decision
+                | AgentEventKind::Action
+                | AgentEventKind::Outcome
+                | AgentEventKind::ToolCall
+                | AgentEventKind::Error
+        ) {
+            self.flow.push(FlowEvent {
+                id: event.id.clone(),
+                timestamp: event.timestamp,
+                kind: event.kind.clone(),
+                name: event.name.clone(),
+                status: event.status.clone(),
+                tool_name: event.tool_name.clone(),
+                model: event.model.clone(),
+                tokens: event_tokens,
+                cost_usd: usage.cost_usd.unwrap_or(0.0),
+            });
         }
 
         if is_retry(event) {
@@ -141,17 +178,21 @@ pub fn analyze_session(events: &[AgentEvent]) -> Option<SessionAnalytics> {
 
     let mut turn_rows = turns
         .into_iter()
-        .map(|(turn_id, values)| TurnAnalytics {
-            turn_id,
-            tokens: values.tokens.clone(),
-            decisions: values.decisions,
-            tool_calls: values.tool_calls,
-            actions: values.actions,
-            outcomes: values.outcomes,
-            successful_outcomes: values.successful_outcomes,
-            errors: values.errors,
-            retries: values.retries,
-            efficiency: values.efficiency(),
+        .map(|(turn_id, mut values)| {
+            values.flow.sort_by_key(|event| event.timestamp);
+            TurnAnalytics {
+                turn_id,
+                tokens: values.tokens.clone(),
+                decisions: values.decisions,
+                tool_calls: values.tool_calls,
+                actions: values.actions,
+                outcomes: values.outcomes,
+                successful_outcomes: values.successful_outcomes,
+                errors: values.errors,
+                retries: values.retries,
+                efficiency: values.efficiency(),
+                flow: values.flow,
+            }
         })
         .collect::<Vec<_>>();
     turn_rows.sort_by(|a, b| a.turn_id.cmp(&b.turn_id));
@@ -183,7 +224,10 @@ fn float_ratio(value: f64, count: usize) -> Option<f64> {
 
 fn is_success(event: &AgentEvent) -> bool {
     event.status.as_deref().is_some_and(|status| {
-        matches!(status.to_ascii_lowercase().as_str(), "success" | "ok" | "completed")
+        matches!(
+            status.to_ascii_lowercase().as_str(),
+            "success" | "ok" | "completed"
+        )
     })
 }
 
@@ -193,27 +237,27 @@ fn is_retry(event: &AgentEvent) -> bool {
         return true;
     }
 
-    event
-        .attributes
-        .as_object()
-        .is_some_and(|attributes| {
-            attributes.keys().any(|key| {
-                let key = key.to_ascii_lowercase();
-                key.contains("retry") || key.contains("attempt")
-            })
+    event.attributes.as_object().is_some_and(|attributes| {
+        attributes.keys().any(|key| {
+            let key = key.to_ascii_lowercase();
+            key.contains("retry") || key.contains("attempt")
         })
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::{Duration, Utc};
     use serde_json::json;
 
     use super::analyze_session;
     use crate::core::model::{AgentEvent, AgentEventKind};
 
     #[test]
-    fn computes_token_efficiency_and_retry_ratio() {
+    fn computes_token_efficiency_and_correlated_flow() {
+        let base = Utc::now();
         let mut llm = AgentEvent::new("codex", AgentEventKind::LlmCall, "api_request");
+        llm.timestamp = base;
         llm.session_id = Some("s1".into());
         llm.turn_id = Some("t1".into());
         llm.model = Some("gpt-5".into());
@@ -222,10 +266,12 @@ mod tests {
         llm.cost_usd = Some(0.02);
 
         let mut decision = AgentEvent::new("codex", AgentEventKind::Decision, "tool_decision");
+        decision.timestamp = base + Duration::milliseconds(1);
         decision.session_id = Some("s1".into());
         decision.turn_id = Some("t1".into());
 
         let mut retry = AgentEvent::new("codex", AgentEventKind::LlmCall, "api_retry");
+        retry.timestamp = base + Duration::milliseconds(2);
         retry.session_id = Some("s1".into());
         retry.turn_id = Some("t1".into());
         retry.input_tokens = Some(40);
@@ -233,10 +279,12 @@ mod tests {
         retry.attributes = json!({ "retry_count": 1 });
 
         let mut tool = AgentEvent::new("codex", AgentEventKind::ToolCall, "tool_result");
+        tool.timestamp = base + Duration::milliseconds(3);
         tool.session_id = Some("s1".into());
         tool.turn_id = Some("t1".into());
 
         let mut outcome = AgentEvent::new("codex", AgentEventKind::Outcome, "finish");
+        outcome.timestamp = base + Duration::milliseconds(4);
         outcome.session_id = Some("s1".into());
         outcome.turn_id = Some("t1".into());
         outcome.status = Some("success".into());
@@ -251,5 +299,9 @@ mod tests {
         assert_eq!(report.efficiency.tokens_per_tool_call, Some(150.0));
         assert_eq!(report.efficiency.retry_token_ratio, Some(50.0 / 150.0));
         assert_eq!(report.by_model["gpt-5"].total_tokens, 100);
+        assert_eq!(report.turns[0].flow.len(), 3);
+        assert_eq!(report.turns[0].flow[0].kind, AgentEventKind::Decision);
+        assert_eq!(report.turns[0].flow[1].kind, AgentEventKind::ToolCall);
+        assert_eq!(report.turns[0].flow[2].kind, AgentEventKind::Outcome);
     }
 }
