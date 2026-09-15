@@ -1,103 +1,109 @@
 # Agent Telemetry
 
-**Observe how AI agents decide, act, and improve.**
+Observe how AI agents act, decide, and improve.
 
-Agent Telemetry is a local-first observability and decision-intelligence platform for AI agents. The core is vendor-neutral: Claude Code, Codex, Gemini CLI, and future agents are normalized into a canonical event model, while storage/query backends remain replaceable.
+Agent Telemetry is a vendor- and storage-neutral observability and decision-intelligence layer for AI agents. It normalizes agent-specific telemetry into a canonical model and persists it through pluggable storage adapters.
 
 ## Architecture
 
 ```text
-Agent -> Ingest Adapter -> Canonical Agent Event -> TelemetryStore
-                                             |-> GreptimeDB
-                                             |-> DuckDB
-                                             `-> future backends
+Claude Code / Codex / Gemini / ...
+              |
+              v
+      OTLP HTTP/protobuf
+              |
+              v
+     Agent Telemetry Receiver
+              |
+              v
+       Semantic Adapters
+        |             |
+  Claude Code     Generic OTel
+        \             /
+         Canonical AgentEvent
+              |
+      TelemetryStore port
+        |           |
+   GreptimeDB    DuckDB
 ```
 
-The canonical lifecycle is:
+The canonical event model includes `Observation -> Decision -> Action -> Outcome -> Learning` as first-class event kinds. Vendor-specific raw data is retained on every event so semantic adapters can evolve without losing source facts.
 
-```text
-Observation -> Decision -> Action -> Outcome -> Learning
-```
+## Current status
 
-Raw vendor telemetry is retained in `AgentEvent.raw`; normalized attributes live alongside it. Decision events can carry evidence, alternatives, constraints, assumptions, confidence and expected outcomes without storing private chain-of-thought.
+The Rust MVP currently includes:
 
-## Status
+- canonical `AgentEvent` and `DecisionContext` models
+- declarative storage boundary via `TelemetryStore`
+- GreptimeDB storage adapter
+- optional DuckDB storage adapter
+- JSONL import
+- OTLP HTTP/protobuf receiver for logs and traces
+- Claude Code semantic adapter
+- generic OpenTelemetry fallback adapter
+- `atel` CLI
 
-The first Rust MVP includes:
+## Quick start with Claude Code
 
-- canonical `AgentEvent` and `DecisionContext`
-- storage port (`TelemetryStore`)
-- GreptimeDB backend over the HTTP SQL API
-- optional DuckDB backend
-- JSONL import adapter
-- `atel` CLI for initialization, import, and recent-event queries
-
-Native OTLP ingestion and vendor-specific semantic adapters are the next implementation slice.
-
-## Build
-
-```bash
-cargo build
-```
-
-DuckDB is feature-gated because the bundled native library makes builds heavier:
-
-```bash
-cargo build --features duckdb-backend
-```
-
-## GreptimeDB quick start
-
-Assuming GreptimeDB is running locally on port 4000:
+Start GreptimeDB locally on `http://127.0.0.1:4000`, then run Agent Telemetry:
 
 ```bash
 cargo run -- init
-cargo run -- import ./examples/events.jsonl
-cargo run -- recent --limit 20
+cargo run -- serve
 ```
 
-Configuration can also be supplied through environment variables:
+In another shell, configure Claude Code to send logs and beta traces to Agent Telemetry:
 
 ```bash
-export ATEL_GREPTIME_ENDPOINT=http://127.0.0.1:4000
-export ATEL_GREPTIME_DATABASE=public
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_METRICS_EXPORTER=none
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+claude
 ```
 
-GreptimeDB's SQL HTTP endpoint is `/v1/sql`; Agent Telemetry keeps that backend detail behind `TelemetryStore`.
+Then inspect normalized events:
 
-## DuckDB
+```bash
+cargo run -- recent --agent claude-code --limit 20
+```
+
+Claude Code prompt and response content remains redacted by default. Agent Telemetry does not require enabling `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, or `OTEL_LOG_TOOL_DETAILS` for the basic observability flow.
+
+## DuckDB backend
 
 ```bash
 cargo run --features duckdb-backend -- \
   --backend duckdb \
-  --duckdb-path ./agent_telemetry.duckdb \
+  --duckdb-path agent_telemetry.duckdb \
   init
 ```
 
-## Canonical event example
+The same backend can run the OTLP receiver:
 
-```json
-{
-  "timestamp": "2026-09-15T12:00:00Z",
-  "agent": "claude-code",
-  "session_id": "session-1",
-  "kind": "decision",
-  "name": "diagnose_test_failure",
-  "decision": {
-    "question": "Why did the test fail?",
-    "evidence": ["rspec output", "postgres log"],
-    "alternatives": ["fixture issue", "database connection"],
-    "selected": "database connection",
-    "constraints": [],
-    "assumptions": ["postgres should be reachable"],
-    "confidence": 0.72,
-    "expected_outcome": "test passes after fixing connection"
-  },
-  "attributes": {},
-  "raw": {}
-}
+```bash
+cargo run --features duckdb-backend -- \
+  --backend duckdb \
+  --duckdb-path agent_telemetry.duckdb \
+  serve
 ```
 
-## Design direction
+## CLI
 
-The product core is the canonical model and query semantics, not a specific database. GreptimeDB is the natural real-time OTLP backend; DuckDB is the natural local/ad-hoc analytics backend. Additional sinks, archives, and query adapters can be introduced without changing the domain model.
+```text
+atel init
+atel import <events.jsonl>
+atel recent [--agent <name>] [--session <id>] [--limit <n>]
+atel serve [--bind 127.0.0.1:4318]
+```
+
+## Next
+
+- OTLP metrics receiver
+- Codex semantic adapter
+- Gemini CLI semantic adapter
+- Decision -> Action -> Outcome correlation queries
+- MCP query interface
