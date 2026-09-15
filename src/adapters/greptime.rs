@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
@@ -34,7 +34,10 @@ impl GreptimeStore {
             .context("GreptimeDB request failed")?;
 
         let status = response.status();
-        let body: Value = response.json().await.context("invalid GreptimeDB response")?;
+        let body: Value = response
+            .json()
+            .await
+            .context("invalid GreptimeDB response")?;
         if !status.is_success() || body.get("error").is_some() {
             return Err(anyhow!("GreptimeDB SQL failed: {body}"));
         }
