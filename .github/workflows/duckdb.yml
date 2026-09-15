@@ -1,0 +1,35 @@
+name: DuckDB CI
+
+on:
+  pull_request:
+    paths:
+      - "src/adapters/duckdb.rs"
+      - "src/adapters/mod.rs"
+      - "src/core/**"
+      - "src/main.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/duckdb.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/adapters/duckdb.rs"
+      - "src/adapters/mod.rs"
+      - "src/core/**"
+      - "src/main.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/duckdb.yml"
+
+jobs:
+  duckdb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: duckdb
+      - run: cargo check --all-targets --features duckdb-backend
+      - run: cargo test --features duckdb-backend
