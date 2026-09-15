@@ -102,7 +102,10 @@ async fn receive_traces(State(state): State<ReceiverState>, body: Bytes) -> Resp
     protobuf_response(ExportTraceServiceResponse::default())
 }
 
-fn normalize_logs(registry: &AdapterRegistry, request: ExportLogsServiceRequest) -> Vec<AgentEvent> {
+fn normalize_logs(
+    registry: &AdapterRegistry,
+    request: ExportLogsServiceRequest,
+) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     for resource_logs in request.resource_logs {
         let resource_attributes = resource_logs
@@ -121,7 +124,8 @@ fn normalize_logs(registry: &AdapterRegistry, request: ExportLogsServiceRequest)
                 } else {
                     record.event_name
                 };
-                let timestamp = unix_nanos(record.time_unix_nano.max(record.observed_time_unix_nano));
+                let timestamp =
+                    unix_nanos(record.time_unix_nano.max(record.observed_time_unix_nano));
                 let normalized = OtlpLogRecord {
                     event_name,
                     timestamp,
@@ -129,7 +133,11 @@ fn normalize_logs(registry: &AdapterRegistry, request: ExportLogsServiceRequest)
                     span_id: id_or_none(&record.span_id),
                     attributes,
                     resource_attributes: resource_attributes.clone(),
-                    body: record.body.as_ref().map(any_value_to_json).unwrap_or(Value::Null),
+                    body: record
+                        .body
+                        .as_ref()
+                        .map(any_value_to_json)
+                        .unwrap_or(Value::Null),
                 };
                 if let Some(event) = registry.normalize_log(&normalized) {
                     events.push(event);
