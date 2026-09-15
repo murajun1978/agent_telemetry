@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  rust:
+  fast:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,6 +14,17 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo check --all-targets --all-features
-      - run: cargo test --all-features
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo check --all-targets
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
+  duckdb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: duckdb
+      - run: cargo check --all-targets --features duckdb-backend
+      - run: cargo test --features duckdb-backend

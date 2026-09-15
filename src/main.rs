@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use agent_telemetry::{
     adapters::{greptime::GreptimeStore, jsonl},
     core::store::{EventQuery, TelemetryStore},
+    ingest::otlp,
 };
 
 #[cfg(feature = "duckdb-backend")]
@@ -60,6 +61,10 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    Serve {
+        #[arg(long, env = "ATEL_OTLP_BIND", default_value = "127.0.0.1:4318")]
+        bind: SocketAddr,
+    },
 }
 
 #[tokio::main]
@@ -93,6 +98,10 @@ async fn main() -> Result<()> {
             for event in events {
                 println!("{}", serde_json::to_string(&event)?);
             }
+        }
+        Command::Serve { bind } => {
+            store.init().await?;
+            otlp::serve(bind, store).await?;
         }
     }
 
