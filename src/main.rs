@@ -11,7 +11,7 @@ use agent_telemetry::{
 #[cfg(feature = "duckdb-backend")]
 use agent_telemetry::adapters::duckdb::DuckDbStore;
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum Backend {
     Greptime,
     #[cfg(feature = "duckdb-backend")]
