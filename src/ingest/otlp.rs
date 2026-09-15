@@ -2,7 +2,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::{
-    Router,
+    Json, Router,
     body::{Body, Bytes},
     extract::State,
     http::{StatusCode, header},
@@ -22,7 +22,7 @@ use serde_json::{Map, Number, Value};
 use uuid::Uuid;
 
 use crate::{
-    adapters::agents::AdapterRegistry,
+    adapters::agents::{AdapterRegistry, CursorAgentAdapter},
     core::{model::AgentEvent, store::TelemetryStore},
 };
 
@@ -64,6 +64,7 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     let app = Router::new()
         .route("/v1/logs", post(receive_logs))
         .route("/v1/traces", post(receive_traces))
+        .route("/v1/hooks/cursor", post(receive_cursor_hook))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
@@ -73,6 +74,22 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     axum::serve(listener, app)
         .await
         .context("OTLP receiver failed")
+}
+
+async fn receive_cursor_hook(
+    State(state): State<ReceiverState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let adapter = CursorAgentAdapter;
+    let Some(event) = adapter.normalize_hook(&payload) else {
+        return bad_request("invalid Cursor hook payload".into());
+    };
+
+    if let Err(error) = state.store.append(&[event]).await {
+        return server_error(format!("failed to store Cursor hook event: {error:#}"));
+    }
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn receive_logs(State(state): State<ReceiverState>, body: Bytes) -> Response {
