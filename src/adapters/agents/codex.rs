@@ -40,11 +40,12 @@ impl SemanticAdapter for CodexAdapter {
     fn normalize_span(&self, record: &OtlpSpanRecord) -> Option<AgentEvent> {
         let event_name =
             string_attr(&record.attributes, "event.name").filter(|name| name.starts_with("codex."));
-        let is_codex_span = event_name.is_some()
-            || record.name.starts_with("codex.")
-            || codex_service(&record.resource_attributes)
-            || record.attributes.contains_key("thread.id")
-            || record.attributes.contains_key("conversation.id");
+        let has_codex_name = event_name.is_some() || record.name.starts_with("codex.");
+        let is_codex_turn_span = record.name == "session_task.turn"
+            && record.attributes.contains_key("thread.id")
+            && record.attributes.contains_key("model");
+        let is_codex_span =
+            has_codex_name || codex_service(&record.resource_attributes) || is_codex_turn_span;
 
         if !is_codex_span {
             return None;
@@ -55,7 +56,7 @@ impl SemanticAdapter for CodexAdapter {
             .unwrap_or(&record.name)
             .strip_prefix("codex.")
             .unwrap_or(event_name.as_deref().unwrap_or(&record.name));
-        let kind = if event_name.is_some() {
+        let kind = if has_codex_name {
             kind_for_event(canonical_name)
         } else {
             AgentEventKind::Trace
@@ -220,6 +221,10 @@ fn cost_usd(attributes: &Map<String, Value>) -> Option<f64> {
 }
 
 fn status_from_attributes(attributes: &Map<String, Value>) -> Option<String> {
+    if let Some(status) = string_attr(attributes, "status") {
+        return Some(status);
+    }
+
     if let Some(success) = attributes.get("success") {
         match success {
             Value::Bool(true) => return Some("success".into()),
@@ -306,6 +311,20 @@ mod tests {
         }
     }
 
+    fn span_record(name: &str, attributes: Map<String, Value>) -> OtlpSpanRecord {
+        OtlpSpanRecord {
+            name: name.into(),
+            timestamp: Utc::now(),
+            trace_id: "trace-1".into(),
+            span_id: "span-1".into(),
+            parent_span_id: None,
+            duration_ms: 123.0,
+            status: None,
+            attributes,
+            resource_attributes: Map::new(),
+        }
+    }
+
     #[test]
     fn prefers_codex_event_name_attribute() {
         let mut attributes = Map::new();
@@ -360,6 +379,45 @@ mod tests {
     }
 
     #[test]
+    fn preserves_explicit_status_attribute() {
+        let mut attributes = Map::new();
+        attributes.insert("event.name".into(), json!("codex.api_request"));
+        attributes.insert("status".into(), json!("error"));
+
+        let event = CodexAdapter
+            .normalize_log(&log_record("event session_telemetry.rs:789", attributes))
+            .unwrap();
+
+        assert_eq!(event.kind, AgentEventKind::LlmCall);
+        assert_eq!(event.status.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn preserves_semantics_from_codex_span_name() {
+        let mut attributes = Map::new();
+        attributes.insert("tool_name".into(), json!("shell"));
+
+        let event = CodexAdapter
+            .normalize_span(&span_record("codex.tool_result", attributes))
+            .unwrap();
+
+        assert_eq!(event.kind, AgentEventKind::ToolCall);
+        assert_eq!(event.name, "tool_result");
+    }
+
+    #[test]
+    fn ignores_generic_span_with_only_thread_id() {
+        let mut attributes = Map::new();
+        attributes.insert("thread.id".into(), json!("generic-thread"));
+
+        assert!(
+            CodexAdapter
+                .normalize_span(&span_record("worker.process", attributes))
+                .is_none()
+        );
+    }
+
+    #[test]
     fn normalizes_codex_turn_span() {
         let mut attributes = Map::new();
         attributes.insert("thread.id".into(), json!("thread-1"));
@@ -368,19 +426,9 @@ mod tests {
         attributes.insert("input_token_count".into(), json!(100));
         attributes.insert("output_token_count".into(), json!(25));
 
-        let event = CodexAdapter
-            .normalize_span(&OtlpSpanRecord {
-                name: "session_task.turn".into(),
-                timestamp: Utc::now(),
-                trace_id: "trace-1".into(),
-                span_id: "span-1".into(),
-                parent_span_id: None,
-                duration_ms: 123.0,
-                status: Some("success".into()),
-                attributes,
-                resource_attributes: Map::new(),
-            })
-            .unwrap();
+        let mut span = span_record("session_task.turn", attributes);
+        span.status = Some("success".into());
+        let event = CodexAdapter.normalize_span(&span).unwrap();
 
         assert_eq!(event.kind, AgentEventKind::Trace);
         assert_eq!(event.session_id.as_deref(), Some("thread-1"));
