@@ -8,6 +8,8 @@ use crate::core::{
     store::{EventQuery, TelemetryStore},
 };
 
+const INSERT_BATCH_SIZE: usize = 500;
+
 pub struct GreptimeStore {
     endpoint: String,
     database: String,
@@ -55,24 +57,22 @@ impl TelemetryStore for GreptimeStore {
         self.sql(
             "CREATE TABLE IF NOT EXISTS agent_events (\
              id STRING, agent STRING, session_id STRING, kind STRING, name STRING, \
-             payload STRING, ts TIMESTAMP TIME INDEX, PRIMARY KEY(agent, id))",
+             payload STRING, ts TIMESTAMP(9) TIME INDEX, PRIMARY KEY(agent, id))",
         )
         .await?;
         Ok(())
     }
 
     async fn append(&self, events: &[AgentEvent]) -> Result<()> {
-        for event in events {
-            let payload = sql_string(&serde_json::to_string(event)?);
-            let id = sql_string(&event.id);
-            let agent = sql_string(&event.agent);
-            let session = sql_string(event.session_id.as_deref().unwrap_or(""));
-            let kind = sql_string(&format!("{:?}", event.kind).to_lowercase());
-            let name = sql_string(&event.name);
-            let ts = event.timestamp.format("%Y-%m-%d %H:%M:%S%.3f");
+        for batch in events.chunks(INSERT_BATCH_SIZE) {
+            let values = batch
+                .iter()
+                .map(insert_values)
+                .collect::<Result<Vec<_>>>()?
+                .join(", ");
+
             self.sql(&format!(
-                "INSERT INTO agent_events (id, agent, session_id, kind, name, payload, ts) \
-                 VALUES ({id}, {agent}, {session}, {kind}, {name}, {payload}, '{ts}')"
+                "INSERT INTO agent_events (id, agent, session_id, kind, name, payload, ts) VALUES {values}"
             ))
             .await?;
         }
@@ -103,8 +103,26 @@ impl TelemetryStore for GreptimeStore {
     }
 }
 
+fn insert_values(event: &AgentEvent) -> Result<String> {
+    let payload = sql_string(&serde_json::to_string(event)?);
+    let id = sql_string(&event.id);
+    let agent = sql_string(&event.agent);
+    let session = sql_optional_string(event.session_id.as_deref());
+    let kind = sql_string(event.kind.as_str());
+    let name = sql_string(&event.name);
+    let timestamp = event.timestamp.format("%Y-%m-%d %H:%M:%S%.9f");
+
+    Ok(format!(
+        "({id}, {agent}, {session}, {kind}, {name}, {payload}, '{timestamp}')"
+    ))
+}
+
 fn sql_string(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn sql_optional_string(value: Option<&str>) -> String {
+    value.map(sql_string).unwrap_or_else(|| "NULL".to_owned())
 }
 
 fn extract_payload_rows(body: &Value) -> Result<Vec<AgentEvent>> {
@@ -123,10 +141,16 @@ fn extract_payload_rows(body: &Value) -> Result<Vec<AgentEvent>> {
 
 #[cfg(test)]
 mod tests {
-    use super::sql_string;
+    use super::{sql_optional_string, sql_string};
 
     #[test]
     fn escapes_sql_strings() {
         assert_eq!(sql_string("agent's"), "'agent''s'");
+    }
+
+    #[test]
+    fn keeps_missing_optional_strings_as_null() {
+        assert_eq!(sql_optional_string(None), "NULL");
+        assert_eq!(sql_optional_string(Some("")), "''");
     }
 }
