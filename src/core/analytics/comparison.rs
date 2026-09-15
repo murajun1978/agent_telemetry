@@ -4,9 +4,7 @@ use crate::core::model::AgentEvent;
 
 use super::{
     aggregate::Aggregate,
-    types::{
-        AgentComparison, ComparisonReport, ModelComparison, SessionComparison, TokenTotals,
-    },
+    types::{AgentComparison, ComparisonReport, ModelComparison, SessionComparison, TokenTotals},
     util::{count_ratio, float_ratio, ratio},
 };
 
