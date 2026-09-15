@@ -49,6 +49,7 @@ The Rust MVP currently includes:
 - Gemini CLI semantic adapter
 - generic OpenTelemetry fallback adapter
 - session/turn token analytics and Decision -> Action -> Outcome flow correlation
+- cross-session and cross-agent efficiency comparison
 - token-efficiency metrics such as tokens per success and retry token ratio
 - `atel` CLI
 
@@ -215,6 +216,33 @@ The JSON report includes:
 
 This keeps token analysis tied to agent behavior and outcomes instead of treating token consumption as a standalone cost metric.
 
+## Cross-session and cross-agent comparison
+
+Compare recent sessions across all agents:
+
+```bash
+cargo run -- compare --limit 5000
+```
+
+Compare sessions for one agent:
+
+```bash
+cargo run -- compare --agent codex --limit 5000
+```
+
+The comparison report includes, without ranking agents:
+
+- session count and successful-session count per agent
+- session success rate
+- total and average tokens/cost per session
+- tokens/cost per successful session
+- decisions, tools, actions, outcomes, errors, and retries
+- the same efficiency metrics used by single-session analysis
+- model-level token totals across agents
+- per-session comparison rows
+
+The comparison command operates on the most recent events returned by the selected backend. Use a sufficiently large `--limit` for the comparison window you intend to analyze.
+
 ## DuckDB backend
 
 ```bash
@@ -240,11 +268,12 @@ atel init
 atel import <events.jsonl>
 atel recent [--agent <name>] [--session <id>] [--limit <n>]
 atel analyze --session <id> [--agent <name>] [--limit <n>]
+atel compare [--agent <name>] [--limit <n>]
 atel serve [--bind 127.0.0.1:4318]
 ```
 
 ## Next
 
 - OTLP metrics receiver
-- cross-session / cross-agent efficiency comparisons
+- task/cohort labels for like-for-like agent comparisons
 - MCP query interface
