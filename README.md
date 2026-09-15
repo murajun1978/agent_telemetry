@@ -17,9 +17,9 @@ Claude Code / Codex / Gemini / ...
               |
               v
        Semantic Adapters
-        |             |
-  Claude Code     Generic OTel
-        \             /
+      /       |         \
+ Claude     Codex    Generic OTel
+      \       |         /
          Canonical AgentEvent
               |
       TelemetryStore port
@@ -40,6 +40,7 @@ The Rust MVP currently includes:
 - JSONL import
 - OTLP HTTP/protobuf receiver for logs and traces
 - Claude Code semantic adapter
+- Codex semantic adapter
 - generic OpenTelemetry fallback adapter
 - `atel` CLI
 
@@ -73,6 +74,40 @@ cargo run -- recent --agent claude-code --limit 20
 
 Claude Code prompt and response content remains redacted by default. Agent Telemetry does not require enabling `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, or `OTEL_LOG_TOOL_DETAILS` for the basic observability flow.
 
+## Quick start with Codex
+
+Codex configures OpenTelemetry in `~/.codex/config.toml`. Point its log and trace exporters at Agent Telemetry using OTLP HTTP protobuf:
+
+```toml
+[otel]
+environment = "dev"
+log_user_prompt = false
+exporter = { otlp-http = { endpoint = "http://127.0.0.1:4318/v1/logs", protocol = "binary" } }
+trace_exporter = { otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "binary" } }
+metrics_exporter = "none"
+```
+
+Start Agent Telemetry in one terminal:
+
+```bash
+cargo run -- init
+cargo run -- serve
+```
+
+Then start Codex in another terminal:
+
+```bash
+codex
+```
+
+Then inspect normalized Codex events:
+
+```bash
+cargo run -- recent --agent codex --limit 20
+```
+
+The Codex adapter normalizes `codex.user_prompt`, `codex.api_request`, `codex.sse_event`, `codex.tool_decision`, `codex.tool_result`, and other Codex telemetry while preserving the original attributes and raw signal. Prompt text remains disabled in the example configuration.
+
 ## DuckDB backend
 
 ```bash
@@ -103,7 +138,6 @@ atel serve [--bind 127.0.0.1:4318]
 ## Next
 
 - OTLP metrics receiver
-- Codex semantic adapter
 - Gemini CLI semantic adapter
 - Decision -> Action -> Outcome correlation queries
 - MCP query interface
