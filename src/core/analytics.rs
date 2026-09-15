@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::model::{AgentEvent, AgentEventKind};
 
@@ -238,11 +239,35 @@ fn is_retry(event: &AgentEvent) -> bool {
     }
 
     event.attributes.as_object().is_some_and(|attributes| {
-        attributes.keys().any(|key| {
+        attributes.iter().any(|(key, value)| {
             let key = key.to_ascii_lowercase();
-            key.contains("retry") || key.contains("attempt")
+            if key.contains("retry") {
+                numeric_value(value).is_some_and(|count| count > 0)
+                    || bool_value(value).unwrap_or(false)
+            } else if key.contains("attempt") {
+                numeric_value(value).is_some_and(|attempt| attempt > 1)
+            } else {
+                false
+            }
         })
     })
+}
+
+fn numeric_value(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(value) => value.as_u64(),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn bool_value(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) if value.eq_ignore_ascii_case("true") => Some(true),
+        Value::String(value) if value.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -303,5 +328,21 @@ mod tests {
         assert_eq!(report.turns[0].flow[0].kind, AgentEventKind::Decision);
         assert_eq!(report.turns[0].flow[1].kind, AgentEventKind::ToolCall);
         assert_eq!(report.turns[0].flow[2].kind, AgentEventKind::Outcome);
+    }
+
+    #[test]
+    fn first_attempt_and_zero_retry_count_are_not_retries() {
+        let mut first_attempt = AgentEvent::new("agent", AgentEventKind::LlmCall, "api_request");
+        first_attempt.input_tokens = Some(10);
+        first_attempt.attributes = json!({ "attempt": 1, "retry_count": 0 });
+
+        let mut second_attempt = AgentEvent::new("agent", AgentEventKind::LlmCall, "api_request");
+        second_attempt.input_tokens = Some(20);
+        second_attempt.attributes = json!({ "attempt": 2 });
+
+        let report = analyze_session(&[first_attempt, second_attempt]).unwrap();
+
+        assert_eq!(report.retries, 1);
+        assert_eq!(report.efficiency.retry_token_ratio, Some(20.0 / 30.0));
     }
 }
