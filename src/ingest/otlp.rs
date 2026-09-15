@@ -19,6 +19,7 @@ use opentelemetry_proto::tonic::{
 };
 use prost::Message;
 use serde_json::{Map, Number, Value};
+use uuid::Uuid;
 
 use crate::{
     adapters::agents::AdapterRegistry,
@@ -124,22 +125,27 @@ fn normalize_logs(
                 } else {
                     record.event_name
                 };
-                let timestamp =
-                    unix_nanos(record.time_unix_nano.max(record.observed_time_unix_nano));
+                let source_time = if record.time_unix_nano != 0 {
+                    record.time_unix_nano
+                } else {
+                    record.observed_time_unix_nano
+                };
+                let body = record
+                    .body
+                    .as_ref()
+                    .map(any_value_to_json)
+                    .unwrap_or(Value::Null);
                 let normalized = OtlpLogRecord {
                     event_name,
-                    timestamp,
+                    timestamp: unix_nanos(source_time),
                     trace_id: id_or_none(&record.trace_id),
                     span_id: id_or_none(&record.span_id),
                     attributes,
                     resource_attributes: resource_attributes.clone(),
-                    body: record
-                        .body
-                        .as_ref()
-                        .map(any_value_to_json)
-                        .unwrap_or(Value::Null),
+                    body,
                 };
-                if let Some(event) = registry.normalize_log(&normalized) {
+                if let Some(mut event) = registry.normalize_log(&normalized) {
+                    event.id = stable_log_id(&normalized, source_time);
                     events.push(event);
                 }
             }
@@ -180,13 +186,33 @@ fn normalize_traces(
                     attributes: attributes_to_json(&span.attributes),
                     resource_attributes: resource_attributes.clone(),
                 };
-                if let Some(event) = registry.normalize_span(&normalized) {
+                if let Some(mut event) = registry.normalize_span(&normalized) {
+                    event.id = stable_span_id(&normalized);
                     events.push(event);
                 }
             }
         }
     }
     events
+}
+
+fn stable_log_id(record: &OtlpLogRecord, source_time: u64) -> String {
+    let key = format!(
+        "log|{}|{}|{}|{}|{}|{}|{}",
+        record.event_name,
+        source_time,
+        record.trace_id.as_deref().unwrap_or(""),
+        record.span_id.as_deref().unwrap_or(""),
+        Value::Object(record.resource_attributes.clone()),
+        Value::Object(record.attributes.clone()),
+        record.body
+    );
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
+}
+
+fn stable_span_id(record: &OtlpSpanRecord) -> String {
+    let key = format!("trace|{}|{}", record.trace_id, record.span_id);
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
 }
 
 fn attributes_to_json(attributes: &[KeyValue]) -> Map<String, Value> {
@@ -204,6 +230,9 @@ fn attributes_to_json(attributes: &[KeyValue]) -> Map<String, Value> {
 fn any_value_to_json(value: &AnyValue) -> Value {
     match value.value.as_ref() {
         Some(any_value::Value::StringValue(value)) => Value::String(value.clone()),
+        Some(any_value::Value::StringValueStrindex(value)) => {
+            Value::String(format!("#strindex:{value}"))
+        }
         Some(any_value::Value::BoolValue(value)) => Value::Bool(*value),
         Some(any_value::Value::IntValue(value)) => Value::Number((*value).into()),
         Some(any_value::Value::DoubleValue(value)) => Number::from_f64(*value)
