@@ -20,6 +20,25 @@ pub enum AgentEventKind {
     Unknown,
 }
 
+impl AgentEventKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Observation => "observation",
+            Self::Decision => "decision",
+            Self::Action => "action",
+            Self::Outcome => "outcome",
+            Self::Learning => "learning",
+            Self::LlmCall => "llm_call",
+            Self::ToolCall => "tool_call",
+            Self::Error => "error",
+            Self::Metric => "metric",
+            Self::Log => "log",
+            Self::Trace => "trace",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionContext {
     #[serde(default)]
@@ -108,5 +127,20 @@ impl AgentEvent {
             attributes: Value::Object(Default::default()),
             raw: Value::Null,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentEventKind;
+
+    #[test]
+    fn event_kind_str_matches_serde_wire_format() {
+        assert_eq!(AgentEventKind::LlmCall.as_str(), "llm_call");
+        assert_eq!(AgentEventKind::ToolCall.as_str(), "tool_call");
+        assert_eq!(
+            serde_json::to_string(&AgentEventKind::LlmCall).unwrap(),
+            "\"llm_call\""
+        );
     }
 }
