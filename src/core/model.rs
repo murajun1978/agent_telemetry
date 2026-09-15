@@ -174,6 +174,40 @@ impl AgentEvent {
         usage.cost_usd = usage.cost_usd.or(self.cost_usd);
 
         if let Some(attributes) = self.attributes.as_object() {
+            usage.input_tokens = usage.input_tokens.or_else(|| {
+                u64_attr_any(
+                    attributes,
+                    &[
+                        "input_tokens",
+                        "input_token_count",
+                        "gen_ai.usage.input_tokens",
+                        "cursor.api.request.input_tokens",
+                        "codex.turn.token_usage.input_tokens",
+                    ],
+                )
+            });
+            usage.output_tokens = usage.output_tokens.or_else(|| {
+                u64_attr_any(
+                    attributes,
+                    &[
+                        "output_tokens",
+                        "output_token_count",
+                        "gen_ai.usage.output_tokens",
+                        "cursor.api.request.output_tokens",
+                        "codex.turn.token_usage.output_tokens",
+                    ],
+                )
+            });
+            usage.cost_usd = usage
+                .cost_usd
+                .or_else(|| f64_attr_any(attributes, &["cost_usd", "gen_ai.usage.cost_usd"]))
+                .or_else(|| {
+                    u64_attr_any(
+                        attributes,
+                        &["cost_usd_micros", "codex.turn.cost_microusd"],
+                    )
+                    .map(|micros| micros as f64 / 1_000_000.0)
+                });
             usage.cached_input_tokens = usage.cached_input_tokens.or_else(|| {
                 u64_attr_any(
                     attributes,
@@ -239,6 +273,16 @@ fn u64_attr_any(attributes: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
     })
 }
 
+fn f64_attr_any(attributes: &Map<String, Value>, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        attributes.get(*key).and_then(|value| match value {
+            Value::Number(value) => value.as_f64(),
+            Value::String(value) => value.parse().ok(),
+            _ => None,
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -275,5 +319,27 @@ mod tests {
         assert_eq!(usage.cached_input_tokens, Some(40));
         assert_eq!(usage.reasoning_tokens, Some(5));
         assert_eq!(usage.cost_usd, Some(0.01));
+    }
+
+    #[test]
+    fn hydrates_generic_otel_token_usage_from_attributes() {
+        let mut event = AgentEvent::new("generic-otel", AgentEventKind::LlmCall, "chat");
+        event.attributes = json!({
+            "gen_ai.usage.input_tokens": 120,
+            "gen_ai.usage.output_tokens": "30",
+            "gen_ai.usage.cached_input_tokens": 50,
+            "gen_ai.usage.reasoning_tokens": 7,
+            "gen_ai.usage.cost_usd": "0.015"
+        });
+
+        event.hydrate_token_usage();
+        let usage = event.token_usage.unwrap();
+
+        assert_eq!(usage.input_tokens, Some(120));
+        assert_eq!(usage.output_tokens, Some(30));
+        assert_eq!(usage.total_tokens(), 150);
+        assert_eq!(usage.cached_input_tokens, Some(50));
+        assert_eq!(usage.reasoning_tokens, Some(7));
+        assert_eq!(usage.cost_usd, Some(0.015));
     }
 }
