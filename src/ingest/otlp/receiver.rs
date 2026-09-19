@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::{Body, Bytes},
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
@@ -25,6 +25,7 @@ use crate::{
 use super::normalize::{normalize_logs, normalize_traces};
 
 const CANONICAL_EVENT_BATCH_SIZE: usize = 500;
+const CANONICAL_EVENT_BODY_LIMIT: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -47,7 +48,10 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     let app = Router::new()
         .route("/v1/logs", post(receive_logs))
         .route("/v1/traces", post(receive_traces))
-        .route("/v1/events", post(receive_events))
+        .route(
+            "/v1/events",
+            post(receive_events).layer(DefaultBodyLimit::max(CANONICAL_EVENT_BODY_LIMIT)),
+        )
         .route("/v1/hooks/cursor", post(receive_cursor_hook))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind)
