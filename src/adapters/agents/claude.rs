@@ -69,6 +69,7 @@ impl SemanticAdapter for ClaudeCodeAdapter {
                 assumptions: Vec::new(),
                 confidence: None,
                 expected_outcome: None,
+            ..Default::default()
             });
         }
 
@@ -135,6 +136,7 @@ impl SemanticAdapter for ClaudeCodeAdapter {
                 assumptions: Vec::new(),
                 confidence: None,
                 expected_outcome: None,
+            ..Default::default()
             });
         }
 

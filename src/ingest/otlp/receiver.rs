@@ -14,14 +14,24 @@ use opentelemetry_proto::tonic::collector::{
     trace::v1::{ExportTraceServiceRequest, ExportTraceServiceResponse},
 };
 use prost::Message;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
     adapters::agents::{AdapterRegistry, CursorAgentAdapter},
-    core::store::TelemetryStore,
+    core::{model::AgentEvent, store::TelemetryStore},
 };
 
 use super::normalize::{normalize_logs, normalize_traces};
+
+const CANONICAL_EVENT_BATCH_SIZE: usize = 500;
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CanonicalEventsPayload {
+    One(AgentEvent),
+    Many(Vec<AgentEvent>),
+}
 
 #[derive(Clone)]
 struct ReceiverState {
@@ -37,6 +47,7 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     let app = Router::new()
         .route("/v1/logs", post(receive_logs))
         .route("/v1/traces", post(receive_traces))
+        .route("/v1/events", post(receive_events))
         .route("/v1/hooks/cursor", post(receive_cursor_hook))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind)
@@ -47,6 +58,41 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     axum::serve(listener, app)
         .await
         .context("OTLP receiver failed")
+}
+
+async fn receive_events(
+    State(state): State<ReceiverState>,
+    Json(payload): Json<CanonicalEventsPayload>,
+) -> Response {
+    let mut events = match canonical_events(payload) {
+        Ok(events) => events,
+        Err(message) => return bad_request(message),
+    };
+    for event in &mut events {
+        event.hydrate_token_usage();
+    }
+
+    if let Err(error) = state.store.append(&events).await {
+        return server_error(format!("failed to store canonical events: {error:#}"));
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn canonical_events(payload: CanonicalEventsPayload) -> Result<Vec<AgentEvent>, String> {
+    let events = match payload {
+        CanonicalEventsPayload::One(event) => vec![event],
+        CanonicalEventsPayload::Many(events) => events,
+    };
+    if events.is_empty() {
+        return Err("canonical event batch must not be empty".into());
+    }
+    if events.len() > CANONICAL_EVENT_BATCH_SIZE {
+        return Err(format!(
+            "canonical event batch exceeds maximum of {CANONICAL_EVENT_BATCH_SIZE}"
+        ));
+    }
+    Ok(events)
 }
 
 async fn receive_cursor_hook(
@@ -112,4 +158,93 @@ fn bad_request(message: String) -> Response {
 
 fn server_error(message: String) -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use serde_json::json;
+
+    use crate::core::model::{AgentEvent, AgentEventKind, DecisionContext};
+
+    use super::{CanonicalEventsPayload, canonical_events};
+
+    fn decision_event() -> AgentEvent {
+        let mut event = AgentEvent::new(
+            "apocrypha",
+            AgentEventKind::Decision,
+            "agent_trace_triage",
+        );
+        event.timestamp = Utc::now();
+        event.trace_id = Some("trace-1".into());
+        event.model = Some("jev-1.13.0".into());
+        event.decision = Some(DecisionContext {
+            question: Some("agent trace triage".into()),
+            evidence: vec![],
+            alternatives: vec![
+                "HEALTHY".into(),
+                "REVIEW".into(),
+                "RETRY".into(),
+                "INCIDENT".into(),
+            ],
+            selected: Some("REVIEW".into()),
+            constraints: vec![],
+            assumptions: vec![],
+            confidence: Some(0.82),
+            probabilities: [
+                ("HEALTHY".into(), 0.10),
+                ("REVIEW".into(), 0.82),
+                ("RETRY".into(), 0.06),
+                ("INCIDENT".into(), 0.02),
+            ]
+            .into_iter()
+            .collect(),
+            risk: Some(0.5),
+            provider: Some("cloudflare-workers-ai".into()),
+            route: vec!["rule".into(), "jev".into()],
+            expected_outcome: None,
+            details: json!({
+                "answers": {
+                    "triage": {
+                        "type": "choice",
+                        "value": "REVIEW"
+                    }
+                }
+            }),
+        });
+        event
+    }
+
+    #[test]
+    fn canonical_ingest_accepts_one_event() {
+        let events = canonical_events(CanonicalEventsPayload::One(decision_event())).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, AgentEventKind::Decision);
+    }
+
+    #[test]
+    fn canonical_ingest_accepts_batches() {
+        let events = canonical_events(CanonicalEventsPayload::Many(vec![
+            decision_event(),
+            decision_event(),
+        ]))
+        .unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn canonical_ingest_rejects_empty_batches() {
+        let error = canonical_events(CanonicalEventsPayload::Many(vec![])).unwrap_err();
+        assert!(error.contains("must not be empty"));
+    }
+
+    #[test]
+    fn canonical_ingest_rejects_oversized_batches() {
+        let error = canonical_events(CanonicalEventsPayload::Many(
+            (0..501).map(|_| decision_event()).collect(),
+        ))
+        .unwrap_err();
+        assert!(error.contains("maximum of 500"));
+    }
 }

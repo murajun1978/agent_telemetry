@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -74,7 +76,7 @@ impl TokenUsage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct DecisionContext {
     #[serde(default)]
     pub question: Option<String>,
@@ -91,7 +93,17 @@ pub struct DecisionContext {
     #[serde(default)]
     pub confidence: Option<f64>,
     #[serde(default)]
+    pub probabilities: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub risk: Option<f64>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub route: Vec<String>,
+    #[serde(default)]
     pub expected_outcome: Option<String>,
+    #[serde(default)]
+    pub details: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -284,7 +296,7 @@ fn f64_attr_any(attributes: &Map<String, Value>, keys: &[&str]) -> Option<f64> {
 mod tests {
     use serde_json::json;
 
-    use super::{AgentEvent, AgentEventKind};
+    use super::{AgentEvent, AgentEventKind, DecisionContext};
 
     #[test]
     fn event_kind_str_matches_serde_wire_format() {
@@ -294,6 +306,57 @@ mod tests {
             serde_json::to_string(&AgentEventKind::LlmCall).unwrap(),
             "\"llm_call\""
         );
+    }
+
+    #[test]
+    fn decision_context_deserializes_probabilistic_provenance_fields() {
+        let decision: DecisionContext = serde_json::from_value(json!({
+            "question": "agent trace triage",
+            "selected": "review",
+            "confidence": 0.82,
+            "probabilities": {
+                "healthy": 0.10,
+                "review": 0.82,
+                "retry": 0.06,
+                "incident": 0.02
+            },
+            "risk": 0.5,
+            "provider": "cloudflare-workers-ai",
+            "route": ["rule", "jev"],
+            "details": {
+                "answers": {
+                    "triage": { "type": "choice", "value": "REVIEW" }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(decision.selected.as_deref(), Some("review"));
+        assert_eq!(decision.confidence, Some(0.82));
+        assert_eq!(decision.probabilities.get("review"), Some(&0.82));
+        assert_eq!(decision.risk, Some(0.5));
+        assert_eq!(decision.provider.as_deref(), Some("cloudflare-workers-ai"));
+        assert_eq!(decision.route, vec!["rule", "jev"]);
+        assert_eq!(
+            decision.details.pointer("/answers/triage/value"),
+            Some(&json!("REVIEW"))
+        );
+    }
+
+    #[test]
+    fn legacy_decision_context_remains_backward_compatible() {
+        let decision: DecisionContext = serde_json::from_value(json!({
+            "question": "which path?",
+            "selected": "a",
+            "confidence": 0.9
+        }))
+        .unwrap();
+
+        assert!(decision.probabilities.is_empty());
+        assert_eq!(decision.risk, None);
+        assert_eq!(decision.provider, None);
+        assert!(decision.route.is_empty());
+        assert!(decision.details.is_null());
     }
 
     #[test]
