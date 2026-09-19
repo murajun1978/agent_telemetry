@@ -288,7 +288,8 @@ POST /v1/events
 Content-Type: application/json
 ```
 
-The body may be one `AgentEvent` or a JSON array of up to 500 events. Events are hydrated for
+The body may be one `AgentEvent` or a JSON array of up to 500 events, with a 16 MiB request-body
+limit on this route. Events are hydrated for
 token usage and written through the configured `TelemetryStore`, so the same endpoint works with
 GreptimeDB and the optional DuckDB backend.
 
