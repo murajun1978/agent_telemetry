@@ -218,7 +218,8 @@ mod tests {
 
     #[test]
     fn canonical_ingest_accepts_one_event() {
-        let events = canonical_events(CanonicalEventsPayload::One(Box::new(decision_event()))).unwrap();
+        let events =
+            canonical_events(CanonicalEventsPayload::One(Box::new(decision_event()))).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, AgentEventKind::Decision);
     }
