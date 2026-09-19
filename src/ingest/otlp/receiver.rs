@@ -30,7 +30,7 @@ const CANONICAL_EVENT_BODY_LIMIT: usize = 16 * 1024 * 1024;
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum CanonicalEventsPayload {
-    One(AgentEvent),
+    One(Box<AgentEvent>),
     Many(Vec<AgentEvent>),
 }
 
@@ -85,7 +85,7 @@ async fn receive_events(
 
 fn canonical_events(payload: CanonicalEventsPayload) -> Result<Vec<AgentEvent>, String> {
     let events = match payload {
-        CanonicalEventsPayload::One(event) => vec![event],
+        CanonicalEventsPayload::One(event) => vec![*event],
         CanonicalEventsPayload::Many(events) => events,
     };
     if events.is_empty() {
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn canonical_ingest_accepts_one_event() {
-        let events = canonical_events(CanonicalEventsPayload::One(decision_event())).unwrap();
+        let events = canonical_events(CanonicalEventsPayload::One(Box::new(decision_event()))).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, AgentEventKind::Decision);
     }
