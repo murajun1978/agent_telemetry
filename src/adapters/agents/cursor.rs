@@ -58,7 +58,7 @@ impl CursorAgentAdapter {
                 assumptions: Vec::new(),
                 confidence: None,
                 expected_outcome: None,
-            ..Default::default()
+                ..Default::default()
             });
         }
 
