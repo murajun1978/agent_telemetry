@@ -160,7 +160,6 @@ fn server_error(message: String) -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
 }
 
-
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
@@ -171,11 +170,8 @@ mod tests {
     use super::{CanonicalEventsPayload, canonical_events};
 
     fn decision_event() -> AgentEvent {
-        let mut event = AgentEvent::new(
-            "apocrypha",
-            AgentEventKind::Decision,
-            "agent_trace_triage",
-        );
+        let mut event =
+            AgentEvent::new("apocrypha", AgentEventKind::Decision, "agent_trace_triage");
         event.timestamp = Utc::now();
         event.trace_id = Some("trace-1".into());
         event.model = Some("jev-1.13.0".into());
