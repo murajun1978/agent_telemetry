@@ -206,6 +206,7 @@ fn decision_context(name: &str, attributes: &Map<String, Value>) -> Option<Decis
         assumptions: Vec::new(),
         confidence: None,
         expected_outcome: None,
+        ..Default::default()
     })
 }
 

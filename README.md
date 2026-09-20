@@ -277,3 +277,48 @@ atel serve [--bind 127.0.0.1:4318]
 - OTLP metrics receiver
 - task/cohort labels for like-for-like agent comparisons
 - MCP query interface
+
+
+## Canonical event ingest
+
+The OTLP receiver also accepts already-normalized Agent Telemetry events:
+
+```text
+POST /v1/events
+Content-Type: application/json
+```
+
+The body may be one `AgentEvent` or a JSON array of up to 500 events, with a 16 MiB request-body
+limit on this route. Events are hydrated for
+token usage and written through the configured `TelemetryStore`, so the same endpoint works with
+GreptimeDB and the optional DuckDB backend.
+
+Decision events can carry calibrated decision metadata in `decision`:
+
+```json
+{
+  "kind": "decision",
+  "name": "agent_trace_triage",
+  "model": "jev-1.13.0",
+  "decision": {
+    "question": "agent trace triage",
+    "selected": "REVIEW",
+    "confidence": 0.82,
+    "probabilities": {
+      "HEALTHY": 0.10,
+      "REVIEW": 0.82,
+      "RETRY": 0.06,
+      "INCIDENT": 0.02
+    },
+    "risk": 0.5,
+    "provider": "cloudflare-workers-ai",
+    "route": ["rule", "jev"],
+    "details": {
+      "answers": {}
+    }
+  }
+}
+```
+
+`details` preserves the full typed decision payload so calibration and analysis can evolve without
+discarding the model's original probabilities or provenance.
