@@ -32,8 +32,9 @@ hook endpoints.
 
 Do not use an Access Bypass policy.
 
-Enable **Protect with Access** on the Tunnel route so `cloudflared` validates the Access
-application token before forwarding to Agent Telemetry.
+Enable **Protect with Access** on the Tunnel route. Cloudflare Access validates the service-token
+policy at the edge before the request reaches the Tunnel; `cloudflared` only forwards the request
+after Access has authorized it.
 
 ## 2. Create a remotely-managed Tunnel
 
@@ -51,20 +52,28 @@ integration needs it.
 
 Copy the Tunnel token from the "Add a replica" flow.
 
-The token is a bearer credential. Keep it outside Git.
+The token is a bearer credential. Keep it outside Git and out of the container command line.
 
 ## 3. Configure the host
 
 ```bash
 cd deploy/cloudflare-tunnel
 cp .env.example .env
+
+install -m 700 -d secrets
+read -rsp 'Tunnel token: ' CLOUDFLARE_TUNNEL_TOKEN; echo
+printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > secrets/cloudflare_tunnel_token
+unset CLOUDFLARE_TUNNEL_TOKEN
+chmod 600 secrets/cloudflare_tunnel_token
 ```
 
-Set:
+Set `ATEL_GREPTIME_ENDPOINT` in `.env` and optionally override
+`ATEL_GREPTIME_DATABASE`.
 
-- `CLOUDFLARE_TUNNEL_TOKEN`
-- `ATEL_GREPTIME_ENDPOINT`
-- optionally `ATEL_GREPTIME_DATABASE`
+Compose mounts `secrets/cloudflare_tunnel_token` at
+`/run/secrets/cloudflare_tunnel_token`, and `cloudflared` reads it with `--token-file`.
+The token is therefore not interpolated into Compose command metadata or injected into the
+container environment.
 
 Then start the stack:
 
@@ -72,7 +81,8 @@ Then start the stack:
 docker compose up -d --build
 ```
 
-No host port needs to be opened for 4318.
+No host port needs to be opened for 4318. Agent Telemetry exposes an internal `/healthz` endpoint;
+Compose waits for that healthcheck to pass before starting `cloudflared`.
 
 ## 4. Verify Access
 
@@ -128,7 +138,9 @@ Then redeploy Apocrypha.
 ## Security notes
 
 - Tunnel token, Access Client ID, and Access Client Secret never belong in Git.
+- The Tunnel token is mounted as a Compose secret and read with `--token-file`.
 - Rotate the Tunnel token and service token independently.
 - Restrict the Access application to `/v1/events*` and Service Auth for the Decision Runtime token.
 - The receiver remains bound to the container network rather than the host network.
 - GreptimeDB remains a separate private dependency and is not exposed by this Compose stack.
+- `cloudflared` is pinned to a reviewed version and multi-architecture image digest; upgrades are deliberate.
