@@ -19,9 +19,16 @@ network.
 
 ## 1. Create the Access application first
 
-Create a self-hosted Access application for the telemetry hostname before publishing the tunnel
-route. Use a **Service Auth** policy whose Include rule selects the service token used by
-Apocrypha Decision Runtime.
+Create a self-hosted Access application for the **canonical ingest path only** before publishing
+the tunnel route:
+
+```text
+telemetry.example.com/v1/events*
+```
+
+Use a **Service Auth** policy whose Include rule selects the service token used by Apocrypha
+Decision Runtime. Access path rules are intentionally narrower than the receiver's other OTLP and
+hook endpoints.
 
 Do not use an Access Bypass policy.
 
@@ -34,8 +41,13 @@ Create a remotely-managed Tunnel and configure a published application route:
 
 ```text
 Hostname: telemetry.example.com
+Path:     /v1/events
 Service:  http://agent-telemetry:4318
 ```
+
+Cloudflare Tunnel path routing preserves the request path, so Agent Telemetry still receives
+`POST /v1/events`. Do not create a catch-all route for this hostname unless another protected
+integration needs it.
 
 Copy the Tunnel token from the "Add a replica" flow.
 
@@ -64,7 +76,8 @@ No host port needs to be opened for 4318.
 
 ## 4. Verify Access
 
-Requests without the service token should be rejected by Access.
+Requests to `/v1/events` without the service token should be rejected by Access. Other Agent
+Telemetry endpoints should not have a Tunnel route at all in this deployment.
 
 A valid machine request uses:
 
@@ -116,6 +129,6 @@ Then redeploy Apocrypha.
 
 - Tunnel token, Access Client ID, and Access Client Secret never belong in Git.
 - Rotate the Tunnel token and service token independently.
-- Restrict the Access application to Service Auth for the Decision Runtime token.
+- Restrict the Access application to `/v1/events*` and Service Auth for the Decision Runtime token.
 - The receiver remains bound to the container network rather than the host network.
 - GreptimeDB remains a separate private dependency and is not exposed by this Compose stack.
