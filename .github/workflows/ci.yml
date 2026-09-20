@@ -17,9 +17,3 @@ jobs:
       - run: cargo check --all-targets
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
-      - name: Emit generated Cargo.lock for reproducible deployment
-        run: |
-          cargo generate-lockfile
-          echo '---CARGO-LOCK-BEGIN---'
-          cat Cargo.lock
-          echo '---CARGO-LOCK-END---'
