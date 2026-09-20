@@ -1,0 +1,49 @@
+services:
+  agent-telemetry:
+    build:
+      context: ../..
+      dockerfile: deploy/cloudflare-tunnel/Dockerfile
+    command:
+      - --greptime-endpoint
+      - ${ATEL_GREPTIME_ENDPOINT:?set ATEL_GREPTIME_ENDPOINT}
+      - --greptime-database
+      - ${ATEL_GREPTIME_DATABASE:-public}
+      - serve
+      - --bind
+      - 0.0.0.0:4318
+    restart: unless-stopped
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "4318"
+    networks:
+      - telemetry
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    pull_policy: always
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - agent-telemetry
+    networks:
+      - telemetry
+
+networks:
+  telemetry:
+    driver: bridge
