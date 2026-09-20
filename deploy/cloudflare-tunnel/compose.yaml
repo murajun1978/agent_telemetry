@@ -18,6 +18,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    tmpfs:
+      - /tmp
     expose:
       - "4318"
     networks:
@@ -39,6 +41,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    tmpfs:
+      - /tmp
     depends_on:
       - agent-telemetry
     networks:
