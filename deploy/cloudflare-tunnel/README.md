@@ -64,8 +64,13 @@ install -m 700 -d secrets
 read -rsp 'Tunnel token: ' CLOUDFLARE_TUNNEL_TOKEN; echo
 printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > secrets/cloudflare_tunnel_token
 unset CLOUDFLARE_TUNNEL_TOKEN
-chmod 600 secrets/cloudflare_tunnel_token
+sudo chgrp 65532 secrets/cloudflare_tunnel_token
+chmod 640 secrets/cloudflare_tunnel_token
 ```
+
+The host user remains the file owner, while group `65532` matches the UID/GID used by the pinned
+`cloudflared` image. Mode `0640` lets that non-root container user read the bind-mounted Compose
+secret without making the token world-readable.
 
 Set `ATEL_GREPTIME_ENDPOINT` in `.env` and optionally override
 `ATEL_GREPTIME_DATABASE`.
