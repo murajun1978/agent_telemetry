@@ -1,0 +1,73 @@
+services:
+  agent-telemetry:
+    build:
+      context: ../..
+      dockerfile: deploy/cloudflare-tunnel/Dockerfile
+    command:
+      - --greptime-endpoint
+      - ${ATEL_GREPTIME_ENDPOINT:?set ATEL_GREPTIME_ENDPOINT}
+      - --greptime-database
+      - ${ATEL_GREPTIME_DATABASE:-public}
+      - serve
+      - --bind
+      - 0.0.0.0:4318
+    restart: unless-stopped
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    expose:
+      - "4318"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --output
+        - /dev/null
+        - http://127.0.0.1:4318/healthz
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - telemetry
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    restart: unless-stopped
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    secrets:
+      - cloudflare_tunnel_token
+    depends_on:
+      agent-telemetry:
+        condition: service_healthy
+    networks:
+      - telemetry
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ./secrets/cloudflare_tunnel_token
+
+networks:
+  telemetry:
+    driver: bridge

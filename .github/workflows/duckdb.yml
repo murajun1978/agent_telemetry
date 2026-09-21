@@ -31,5 +31,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: duckdb
-      - run: cargo check --all-targets --features duckdb-backend
-      - run: cargo test --features duckdb-backend
+      - run: cargo check --all-targets --features duckdb-backend --locked
+      - run: cargo test --features duckdb-backend --locked

@@ -2,3 +2,4 @@
 *.duckdb
 *.duckdb.wal
 .env
+/deploy/cloudflare-tunnel/secrets/

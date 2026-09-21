@@ -289,8 +289,7 @@ Content-Type: application/json
 ```
 
 The body may be one `AgentEvent` or a JSON array of up to 500 events, with a 16 MiB request-body
-limit on this route. Events are hydrated for
-token usage and written through the configured `TelemetryStore`, so the same endpoint works with
+limit on this route. Events are hydrated for token usage and written through the configured `TelemetryStore`, so the same endpoint works with
 GreptimeDB and the optional DuckDB backend.
 
 Decision events can carry calibrated decision metadata in `decision`:
@@ -322,3 +321,12 @@ Decision events can carry calibrated decision metadata in `decision`:
 
 `details` preserves the full typed decision payload so calibration and analysis can evolve without
 discarding the model's original probabilities or provenance.
+
+
+## Cloudflare Tunnel deployment
+
+For an Apocrypha Decision Runtime integration, keep the receiver off the public host network and
+publish it through Cloudflare Tunnel + Access Service Auth.
+
+See [deploy/cloudflare-tunnel](deploy/cloudflare-tunnel/README.md) for the Docker Compose topology,
+Tunnel route, Access policy, and service-token setup.

@@ -7,7 +7,7 @@ use axum::{
     extract::{DefaultBodyLimit, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use opentelemetry_proto::tonic::collector::{
     logs::v1::{ExportLogsServiceRequest, ExportLogsServiceResponse},
@@ -46,6 +46,7 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
         adapters: AdapterRegistry::default(),
     };
     let app = Router::new()
+        .route("/healthz", get(healthz))
         .route("/v1/logs", post(receive_logs))
         .route("/v1/traces", post(receive_traces))
         .route(
@@ -62,6 +63,10 @@ pub async fn serve(bind: SocketAddr, store: Arc<dyn TelemetryStore>) -> Result<(
     axum::serve(listener, app)
         .await
         .context("OTLP receiver failed")
+}
+
+async fn healthz() -> StatusCode {
+    StatusCode::NO_CONTENT
 }
 
 async fn receive_events(
